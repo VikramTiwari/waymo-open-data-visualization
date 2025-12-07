@@ -3,7 +3,10 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import { RoadGraph } from './components/RoadGraph';
 import { Agents } from './components/Agents';
-import { CameraRig, CAMERA_VARIATIONS } from './components/CameraRig';
+import { CameraRig } from './components/CameraRig';
+import { CAMERA_VARIATIONS } from './components/cameraVariations';
+import { TrafficLights } from './components/TrafficLights';
+import { PathSamples } from './components/PathSamples';
 
 export function Scene({ data, onFinished }) {
   const [frame, setFrame] = useState(0);
@@ -58,6 +61,55 @@ export function Scene({ data, onFinished }) {
      return String(idVal);
   }, [data]);
 
+  // Extract SDC Speed Trajectory
+  const sdcSpeeds = useMemo(() => {
+    if (!data) return [];
+    
+    const featureMap = data?.context?.featureMap;
+    let map;
+    if (Array.isArray(featureMap)) map = new Map(featureMap);
+    else map = new Map(Object.entries(featureMap || {}));
+    
+    // 1. Find SDC Index
+    const sdcList = map.get('state/is_sdc')?.int64List?.valueList;
+    if (!sdcList) return [];
+    
+    let sdcIndex = sdcList.indexOf(Number(1));
+    if (sdcIndex === -1) sdcIndex = sdcList.findIndex(v => v == 1);
+    if (sdcIndex === -1) return [];
+
+    // 2. Get Speed Data
+    const getVal = (key) => {
+        const feat = map.get(key);
+        return feat?.floatList?.valueList || [];
+    }
+    
+    const pastSpeed = getVal('state/past/speed');
+    const currSpeed = getVal('state/current/speed');
+    const futureSpeed = getVal('state/future/speed');
+    
+    const count = sdcList.length;
+    
+    // Derived lengths
+    const pastLen = pastSpeed.length / count; 
+    const futureLen = futureSpeed.length / count;
+
+    const speeds = [];
+
+    // Past
+    for (let t = 0; t < pastLen; t++) {
+        speeds.push(pastSpeed[sdcIndex * pastLen + t] || 0);
+    }
+    // Current
+    speeds.push(currSpeed[sdcIndex] || 0);
+    // Future
+    for (let t = 0; t < futureLen; t++) {
+        speeds.push(futureSpeed[sdcIndex * futureLen + t] || 0);
+    }
+    
+    return speeds;
+  }, [data]);
+
   // Auto-play loop
   useEffect(() => {
     if (!data) return;
@@ -96,7 +148,9 @@ export function Scene({ data, onFinished }) {
             <OrbitControls makeDefault />
             
             {data && <RoadGraph data={data} center={center} />}
+            {data && <PathSamples data={data} center={center} />}
             {data && <Agents data={data} frame={frame} center={center} />}
+            {data && <TrafficLights key="traffic-lights-spheres" data={data} frame={frame} center={center} />}
             {data && <CameraRig data={data} frame={frame} center={center} variant={variant} />}
         </Canvas>
         
@@ -104,6 +158,7 @@ export function Scene({ data, onFinished }) {
         <div style={{ position: 'absolute', bottom: 20, left: 20, color: 'white', fontFamily: 'monospace', opacity: 0.7 }}>
             <div>Scn: {scenarioId || 'Loading...'}</div>
             <div>Frame: {frame} / {TOTAL_FRAMES}</div>
+            <div>Speed: {sdcSpeeds[frame] ? sdcSpeeds[frame].toFixed(2) : '0.00'} m/s</div>
         </div>
     </div>
   );

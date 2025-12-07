@@ -77,8 +77,8 @@ export function WaymoCar({ dims = [4.68, 2.0, 1.56] }) {
             <SensorPod x={L * 0.38} y={-W * 0.48} z={groundClearance + chassisHeight * 0.85} rotation={[0, 0, 0.4]} color={SENSOR_COLOR} />
 
             {/* 3. Rear Roof Sensors - The small pucks */}
-            <SensorPod x={-L * 0.35} y={W * 0.4} z={groundClearance + chassisHeight + cabinHeight * 0.9} scale={0.6} color={SENSOR_COLOR} />
-            <SensorPod x={-L * 0.35} y={-W * 0.4} z={groundClearance + chassisHeight + cabinHeight * 0.9} scale={0.6} color={SENSOR_COLOR} />
+            <SensorPod x={-L * 0.28} y={W * 0.4} z={groundClearance + chassisHeight + cabinHeight * 0.9} scale={0.6} color={SENSOR_COLOR} />
+            <SensorPod x={-L * 0.28} y={-W * 0.4} z={groundClearance + chassisHeight + cabinHeight * 0.9} scale={0.6} color={SENSOR_COLOR} />
 
             {/* 4. Front Grille Sensor */}
             <mesh position={[L / 2 + 0.1, 0, groundClearance + chassisHeight * 0.5]}>

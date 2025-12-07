@@ -1,57 +1,7 @@
 import { useRef, useEffect, useMemo } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-
-const CAMERA_VARIATIONS = [
-    // Top Down (Z up) - Close to Far
-    [0, 0, 10], 
-    [0, 0, 20], 
-    [0, 0, 30], 
-    [0, 0, 40], 
-    [0, 0, 50],
-    [0, 0, 70],
-    [0, 0, 90],
-    
-    // Isometric - 4 corners (Close)
-    [15, 15, 15],
-    [-15, 15, 15],
-    [15, -15, 15],
-    [-15, -15, 15],
-    
-    // Isometric - 4 corners (Far)
-    [30, 30, 30],
-    [-30, 30, 30],
-    [30, -30, 30],
-    [-30, -30, 30],
-    
-    // Side / Front / Back views (Lower Z)
-    [20, 0, 5],   // Behind/Front
-    [-20, 0, 5],
-    [0, 20, 5],   // Side
-    [0, -20, 5],
-    
-    // Slight Angles
-    [5, 5, 20],
-    [-5, 5, 20],
-    [5, -5, 20],
-    [-5, -5, 20],
-    
-    // High Altitude
-    [0, 0, 150],
-    [10, 10, 100],
-    
-    // Low Angle close up
-    [10, 0, 2],
-    [-10, 0, 2],
-    [0, 10, 2],
-    [0, -10, 2],
-    
-    // Vertical offsets (looking slightly down but mostly top)
-    [0, 10, 40],
-    [0, -10, 40]
-];
-
-export { CAMERA_VARIATIONS };
+import { CAMERA_VARIATIONS } from './cameraVariations';
 
 export function CameraRig({ data, frame, center, variant }) {
     const { camera } = useThree();

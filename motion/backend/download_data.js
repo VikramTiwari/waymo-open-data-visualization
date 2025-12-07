@@ -3,41 +3,54 @@ const fs = require('fs');
 const path = require('path');
 
 async function downloadFiles() {
-  // Usage: node download_data.js [bucketName] [prefix]
-  // Defaulting to a placeholder or common open dataset bucket if not provided
-  // Note: Waymo Open Dataset requires access rights and usually specific buckets.
-  
-  const bucketName = process.argv[2] || 'waymo_open_dataset_v_1_2_0_individual_files';
-  const prefix = process.argv[3] || 'training/';
+  const bucketName = 'waymo_open_dataset_v_1_2_0_individual_files';
+  const prefix = 'training/';
   const destinationFolder = path.join(__dirname, 'data');
+  const filesToDownloadCount = 5;
 
-  // Creates a client
+  console.log(`Scanning bucket ${bucketName} for ${filesToDownloadCount} new files...`);
+
   const storage = new Storage();
 
   if (!fs.existsSync(destinationFolder)){
       fs.mkdirSync(destinationFolder);
   }
 
-  console.log(`Downloading from bucket: ${bucketName}, prefix: ${prefix}`);
-
   try {
-    const [files] = await storage.bucket(bucketName).getFiles({ prefix });
+    // Get a batch of files (more than we need to ensure we find new ones)
+    const [files] = await storage.bucket(bucketName).getFiles({ prefix, maxResults: 50 });
 
-    console.log(`Found ${files.length} files.`);
+    let downloadedCount = 0;
 
     for (const file of files) {
+        if (downloadedCount >= filesToDownloadCount) break;
+
         const fileName = path.basename(file.name);
-        if (!fileName) continue; // skip directories
+        if (!fileName) continue;
 
         const destination = path.join(destinationFolder, fileName);
-        console.log(`Downloading ${file.name} to ${destination}...`);
+        
+        if (fs.existsSync(destination)) {
+            console.log(`  - Exists: ${fileName} (skipping)`);
+            continue;
+        }
+
+        console.log(`  - MATCH! Downloading [${downloadedCount + 1}/${filesToDownloadCount}]: ${fileName}...`);
         
         await file.download({ destination });
-        console.log(`Downloaded ${fileName}`);
+        console.log(`    Downloaded.`);
+        
+        downloadedCount++;
     }
+    
+    if (downloadedCount === 0) {
+        console.log('No new files found to download in the first batch of 50.');
+    } else {
+        console.log(`Successfully downloaded ${downloadedCount} new files.`);
+    }
+
   } catch (err) {
       console.error('ERROR:', err);
-      console.log('NOTE: Ensure you have authenticated with Google Cloud (e.g. `gcloud auth application-default login`) and have access to the bucket.');
   }
 }
 
