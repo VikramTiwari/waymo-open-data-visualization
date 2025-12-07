@@ -5,6 +5,7 @@ import * as THREE from 'three';
 
 export function Scene({ data, onFinished }) {
   const [frame, setFrame] = useState(0);
+  const [variant, setVariant] = useState(0);
   
   // Total frames: 10 past + 1 current + 80 future = 91
   const TOTAL_FRAMES = 91;
@@ -64,7 +65,10 @@ export function Scene({ data, onFinished }) {
 
   // Separate effect for data reset
   useEffect(() => {
-     if (data) setFrame(0);
+     if (data) {
+        setFrame(0);
+        setVariant(Math.floor(Math.random() * CAMERA_VARIATIONS.length));
+     }
   }, [data]);
 
   return (
@@ -77,7 +81,7 @@ export function Scene({ data, onFinished }) {
             
             {data && <RoadGraph data={data} center={center} />}
             {data && <Agents data={data} frame={frame} center={center} />}
-            {data && <CameraRig data={data} frame={frame} center={center} />}
+            {data && <CameraRig data={data} frame={frame} center={center} variant={variant} />}
         </Canvas>
         
         {/* Minimal Info */}
@@ -263,12 +267,15 @@ function Agents({ data, frame, center }) {
 }
 
 
-function CameraRig({ data, frame, center }) {
+function CameraRig({ data, frame, center, variant }) {
     const { camera } = useThree();
-    // We update controls target. We assume OrbitControls is available.
-    // However, OrbitControls from drei does not expose itself via useThree default controls easily unless we use makeDefault.
-    // If makeDefault is used, state.controls is set.
-    
+    const initiatedRef = useRef(false);
+
+    useEffect(() => {
+        // Reset init when data or variant changes
+        initiatedRef.current = false;
+    }, [data, variant]);
+
     // Let's find SDC trajectory once.
     const sdcTrajectory = useMemo(() => {
          const featureMap = data?.context?.featureMap;
@@ -338,12 +345,20 @@ function CameraRig({ data, frame, center }) {
         if (ctrl) {
             const newTarget = new THREE.Vector3(pos[0], pos[1], pos[2]);
             
-            // Calculate delta to move camera by same amount to keep relative position
-            const delta = newTarget.clone().sub(ctrl.target);
-            
-            ctrl.target.copy(newTarget);
-            camera.position.add(delta);
-            ctrl.update();
+            if (!initiatedRef.current) {
+                // Apply variant offset
+                const offset = CAMERA_VARIATIONS[variant] || CAMERA_VARIATIONS[0];
+                camera.position.set(newTarget.x + offset[0], newTarget.y + offset[1], newTarget.z + offset[2]);
+                ctrl.target.copy(newTarget);
+                ctrl.update();
+                initiatedRef.current = true;
+            } else {
+                // Calculate delta to move camera by same amount to keep relative position
+                const delta = newTarget.clone().sub(ctrl.target);
+                ctrl.target.copy(newTarget);
+                camera.position.add(delta);
+                ctrl.update();
+            }
         }
     });
 
@@ -371,4 +386,53 @@ function getTypeColor(type) {
     default: return 'gray';
   }
 }
+
+const CAMERA_VARIATIONS = [
+    // Top Down (Z up) - Close to Far
+    [0, 0, 10], 
+    [0, 0, 20], 
+    [0, 0, 30], 
+    [0, 0, 40], 
+    [0, 0, 50],
+    [0, 0, 70],
+    [0, 0, 90],
+    
+    // Isometric - 4 corners (Close)
+    [15, 15, 15],
+    [-15, 15, 15],
+    [15, -15, 15],
+    [-15, -15, 15],
+    
+    // Isometric - 4 corners (Far)
+    [30, 30, 30],
+    [-30, 30, 30],
+    [30, -30, 30],
+    [-30, -30, 30],
+    
+    // Side / Front / Back views (Lower Z)
+    [20, 0, 5],   // Behind/Front
+    [-20, 0, 5],
+    [0, 20, 5],   // Side
+    [0, -20, 5],
+    
+    // Slight Angles
+    [5, 5, 20],
+    [-5, 5, 20],
+    [5, -5, 20],
+    [-5, -5, 20],
+    
+    // High Altitude
+    [0, 0, 150],
+    [10, 10, 100],
+    
+    // Low Angle close up
+    [10, 0, 2],
+    [-10, 0, 2],
+    [0, 10, 2],
+    [0, -10, 2],
+    
+    // Vertical offsets (looking slightly down but mostly top)
+    [0, 10, 40],
+    [0, -10, 40]
+];
 
