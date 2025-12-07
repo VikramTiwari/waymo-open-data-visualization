@@ -1,4 +1,4 @@
-import { useRef, useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
@@ -292,7 +292,8 @@ export function CameraRig({ data, frameRef, center, variant }) {
                     break;
                 }
                 case 'static_top': {
-                    camPos.set(carPos.x, carPos.y, carPos.z + activeMode.height);
+                    // Offset Y slightly to avoid LookAt(0,0,-1) || Up(0,0,1) singularity
+                    camPos.set(carPos.x, carPos.y - 0.01, carPos.z + activeMode.height);
                     targetPos.copy(carPos); 
                     break;
                 }

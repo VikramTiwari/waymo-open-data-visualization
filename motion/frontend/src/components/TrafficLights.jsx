@@ -116,12 +116,18 @@ export function TrafficLights({ data, frame, center }) {
                 // Traffic lights are usually up high. Z might already reflect that.
                 
                 return (
-                    <mesh key={light.id} position={[step.x, step.y, step.z]}>
-                        <sphereGeometry args={[0.4, 16, 16]} />
-                        <meshBasicMaterial 
-                            color={color} 
-                        />
-                    </mesh>
+                    <group key={light.id} position={[step.x, step.y, step.z]}>
+                         {/* Casing */}
+                        <mesh position={[0, 0, 0]}>
+                            <boxGeometry args={[0.5, 0.5, 1.2]} />
+                            <meshStandardMaterial color="#222" />
+                        </mesh>
+                        {/* Light */}
+                        <mesh position={[0, 0, 0]}>
+                            <sphereGeometry args={[0.3, 16, 16]} />
+                            <meshBasicMaterial color={color} toneMapped={false} />
+                        </mesh>
+                    </group>
                 );
             })}
         </group>
