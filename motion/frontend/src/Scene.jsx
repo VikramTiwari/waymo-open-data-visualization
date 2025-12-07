@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Canvas } from '@react-three/fiber';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, Grid, Line } from '@react-three/drei';
 import * as THREE from 'three';
 
@@ -69,7 +69,7 @@ export function Scene({ data, onFinished }) {
 
   return (
     <div style={{ width: '100%', height: '100vh', position: 'relative', background: 'black' }}>
-        <Canvas camera={{ position: [0, 100, 0], fov: 45, up: [0, 0, 1] }}> {/* Top-down view, Z-up */}
+        <Canvas camera={{ position: [0, 0, 10], fov: 45, up: [0, 1, 0] }}> {/* Top-down view, centered on ego, close up */}
             <color attach="background" args={['#000']} />
             <ambientLight intensity={0.8} />
             <pointLight position={[50, 50, 100]} intensity={1} />
@@ -77,6 +77,7 @@ export function Scene({ data, onFinished }) {
             
             {data && <RoadGraph data={data} center={center} />}
             {data && <Agents data={data} frame={frame} center={center} />}
+            {data && <CameraRig data={data} frame={frame} center={center} />}
         </Canvas>
         
         {/* Minimal Info */}
@@ -174,15 +175,18 @@ function Agents({ data, frame, center }) {
         const pastX = getVal('state/past/x');
         const pastY = getVal('state/past/y');
         const pastZ = getVal('state/past/z');
+        const pastYaw = getVal('state/past/bbox_yaw');
         const pastLen = pastX.length / count; // Should be 10
 
         const currX = getVal('state/current/x');
         const currY = getVal('state/current/y');
         const currZ = getVal('state/current/z');
+        const currYaw = getVal('state/current/bbox_yaw');
         
         const futureX = getVal('state/future/x');
         const futureY = getVal('state/future/y');
         const futureZ = getVal('state/future/z');
+        const futureYaw = getVal('state/future/bbox_yaw');
         const futureLen = futureX.length / count; // Should be 80
         
         const width = getVal('state/current/width');
@@ -200,19 +204,33 @@ function Agents({ data, frame, center }) {
             // Past (10 frames)
             for (let t = 0; t < pastLen; t++) {
                 const idx = i * pastLen + t;
-                trajectory.push([pastX[idx] - cx, pastY[idx] - cy, pastZ[idx] - cz]);
+                trajectory.push([
+                    pastX[idx] - cx, 
+                    pastY[idx] - cy, 
+                    pastZ[idx] - cz,
+                    pastYaw[idx] || 0
+                ]);
             }
             
             // Current (1 frame)
-            trajectory.push([currX[i] - cx, currY[i] - cy, currZ[i] - cz]);
+            trajectory.push([
+                currX[i] - cx, 
+                currY[i] - cy, 
+                currZ[i] - cz,
+                currYaw[i] || 0
+            ]);
             
             // Future (80 frames)
             for (let t = 0; t < futureLen; t++) {
                 const idx = i * futureLen + t;
-                trajectory.push([futureX[idx] - cx, futureY[idx] - cy, futureZ[idx] - cz]);
+                trajectory.push([
+                    futureX[idx] - cx, 
+                    futureY[idx] - cy, 
+                    futureZ[idx] - cz,
+                    futureYaw[idx] || 0
+                ]);
             }
             
-            // Check if SDC (loosely check for 1)
             // Check if SDC (loosely check for 1)
             const isSdc = isSdcList && isSdcList[i] == 1;
 
@@ -234,7 +252,7 @@ function Agents({ data, frame, center }) {
                 if (!pos || isNaN(pos[0])) return null; // Invalid position check
                 
                 return (
-                    <mesh key={agent.id} position={new THREE.Vector3(pos[0], pos[1], pos[2])} rotation={[0, 0, 0]}> 
+                    <mesh key={agent.id} position={new THREE.Vector3(pos[0], pos[1], pos[2])} rotation={[0, 0, pos[3]]}> 
                         <boxGeometry args={[agent.dims[0], agent.dims[1], agent.dims[2]]} />
                         <meshStandardMaterial color={agent.isSdc ? '#00FFFF' : getTypeColor(agent.type)} />
                     </mesh>
@@ -242,6 +260,94 @@ function Agents({ data, frame, center }) {
             })}
         </group>
     );
+}
+
+
+function CameraRig({ data, frame, center }) {
+    const { camera } = useThree();
+    // We update controls target. We assume OrbitControls is available.
+    // However, OrbitControls from drei does not expose itself via useThree default controls easily unless we use makeDefault.
+    // If makeDefault is used, state.controls is set.
+    
+    // Let's find SDC trajectory once.
+    const sdcTrajectory = useMemo(() => {
+         const featureMap = data?.context?.featureMap;
+         if (!featureMap) return null;
+         
+         let map;
+         if (Array.isArray(featureMap)) map = new Map(featureMap);
+         else map = new Map(Object.entries(featureMap || {}));
+
+         const getVal = (key) => { 
+             const feat = map.get(key);
+             if (!feat) return [];
+             return feat.floatList?.valueList || feat.int64List?.valueList || [];
+         };
+         
+         const isSdcList = getVal('state/is_sdc');
+         // Find SDC index
+         let sdcIndex = -1;
+         if (isSdcList) {
+            sdcIndex = isSdcList.indexOf(Number(1));
+            if (sdcIndex === -1) sdcIndex = isSdcList.findIndex(v => v == 1);
+         }
+         if (sdcIndex === -1) sdcIndex = 0; // Fallback
+         
+         const count = isSdcList.length || 1; 
+
+         const pastX = getVal('state/past/x');
+         const pastY = getVal('state/past/y');
+         const pastZ = getVal('state/past/z');
+         const pastLen = pastX.length / count;
+
+         const currX = getVal('state/current/x');
+         const currY = getVal('state/current/y');
+         const currZ = getVal('state/current/z');
+         
+         const futureX = getVal('state/future/x');
+         const futureY = getVal('state/future/y');
+         const futureZ = getVal('state/future/z');
+         const futureLen = futureX.length / count;
+         
+         const [cx, cy, cz] = center;
+         const trajectory = [];
+         
+         // Past
+         for (let t = 0; t < pastLen; t++) {
+             const idx = sdcIndex * pastLen + t;
+             trajectory.push([pastX[idx] - cx, pastY[idx] - cy, pastZ[idx] - cz]);
+         }
+         // Current
+         trajectory.push([currX[sdcIndex] - cx, currY[sdcIndex] - cy, currZ[sdcIndex] - cz]);
+         // Future
+         for (let t = 0; t < futureLen; t++) {
+             const idx = sdcIndex * futureLen + t;
+             trajectory.push([futureX[idx] - cx, futureY[idx] - cy, futureZ[idx] - cz]);
+         }
+         
+         return trajectory;
+    }, [data, center]);
+
+    useFrame((state) => {
+        if (!sdcTrajectory) return;
+        const pos = sdcTrajectory[frame];
+        if (!pos || isNaN(pos[0])) return;
+
+        // Update control target to center on car
+        const ctrl = state.controls;
+        if (ctrl) {
+            const newTarget = new THREE.Vector3(pos[0], pos[1], pos[2]);
+            
+            // Calculate delta to move camera by same amount to keep relative position
+            const delta = newTarget.clone().sub(ctrl.target);
+            
+            ctrl.target.copy(newTarget);
+            camera.position.add(delta);
+            ctrl.update();
+        }
+    });
+
+    return null;
 }
 
 function getRoadColor(type) {
