@@ -44,6 +44,20 @@ export function Scene({ data, onFinished }) {
     return [xList[sdcIndex] || 0, yList[sdcIndex] || 0, zList[sdcIndex] || 0];
   }, [data]);
 
+  const scenarioId = useMemo(() => {
+     if (!data) return null;
+     const featureMap = data?.context?.featureMap;
+     let map;
+     if (Array.isArray(featureMap)) map = new Map(featureMap);
+     else map = new Map(Object.entries(featureMap || {}));
+     
+     const idVal = map.get('scenario/id')?.bytesList?.valueList?.[0];
+     if (!idVal) return 'Unknown';
+     // If it's base64 (common in JSON for bytes), we might want to decode, but often the ID is just the string.
+     // Let's return it as is first.
+     return String(idVal);
+  }, [data]);
+
   // Auto-play loop
   useEffect(() => {
     if (!data) return;
@@ -88,7 +102,7 @@ export function Scene({ data, onFinished }) {
         
         {/* Minimal Info */}
         <div style={{ position: 'absolute', bottom: 20, left: 20, color: 'white', fontFamily: 'monospace', opacity: 0.7 }}>
-            <div>Scn: {data?.context?.name || 'Loading...'}</div>
+            <div>Scn: {scenarioId || 'Loading...'}</div>
             <div>Frame: {frame} / {TOTAL_FRAMES}</div>
         </div>
     </div>

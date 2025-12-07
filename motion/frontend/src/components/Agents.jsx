@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import * as THREE from 'three';
+import { WaymoCar } from './WaymoCar';
 
 export function Agents({ data, frame, center }) {
     const agents = useMemo(() => {
@@ -103,10 +104,18 @@ export function Agents({ data, frame, center }) {
                 if (!pos || isNaN(pos[0])) return null; // Invalid position check
                 
                 return (
-                    <mesh key={agent.id} position={new THREE.Vector3(pos[0], pos[1], pos[2])} rotation={[0, 0, pos[3]]}> 
-                        <boxGeometry args={[agent.dims[0], agent.dims[1], agent.dims[2]]} />
-                        <meshStandardMaterial color={agent.isSdc ? '#00FFFF' : getTypeColor(agent.type)} />
-                    </mesh>
+                    <group key={agent.id} position={new THREE.Vector3(pos[0], pos[1], pos[2])} rotation={[0, 0, pos[3]]}>
+                        {agent.isSdc ? (
+                             <WaymoCar dims={agent.dims} />
+                        ) : (
+                            <>
+                                <mesh> 
+                                    <boxGeometry args={[agent.dims[0], agent.dims[1], agent.dims[2]]} />
+                                    <meshStandardMaterial color={getTypeColor(agent.type)} />
+                                </mesh>
+                            </>
+                        )}
+                    </group>
                 );
             })}
         </group>
