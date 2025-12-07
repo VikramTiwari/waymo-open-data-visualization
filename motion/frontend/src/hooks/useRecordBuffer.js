@@ -49,7 +49,11 @@ export function useRecordBuffer(baseUrl, bufferLimit = 5) {
           isStreamDoneRef.current = true;
           console.log('Stream finished');
         } else {
-          bufferRef.current.push(json.record);
+          bufferRef.current.push({
+            record: json.record,
+            fileInfo: json.fileInfo,
+            scenarioInfo: json.scenarioInfo
+          });
           setBufferSize(bufferRef.current.length);
         }
       } catch (err) {
@@ -70,14 +74,16 @@ export function useRecordBuffer(baseUrl, bufferLimit = 5) {
     if (bufferRef.current.length > 0) {
       const next = bufferRef.current.shift();
       setBufferSize(bufferRef.current.length);
-      setCurrentRecord(next);
+      setCurrentRecord(next); // next is now { record, fileInfo }
       return true;
     }
     return false;
   }, []);
 
   return { 
-    data: currentRecord, 
+    data: currentRecord?.record,
+    fileInfo: currentRecord?.fileInfo, 
+    scenarioInfo: currentRecord?.scenarioInfo,
     isConnected, 
     error, 
     playNext, 

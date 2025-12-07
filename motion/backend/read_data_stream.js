@@ -20,14 +20,13 @@ class TFRecordsStreamReader {
         }
     }
 
-    async *getStream() {
+    async *getStream(startOffset = 0) {
         if (!this.fileHandle) {
             await this.open();
         }
 
-        let position = 0;
+        let position = startOffset;
         const lengthBuffer = Buffer.alloc(8);
-        const crcBuffer = Buffer.alloc(4);
 
         try {
             while (true) {
@@ -39,11 +38,8 @@ class TFRecordsStreamReader {
                 const dataLength = readInt64(lengthBuffer);
                 position += 8;
 
-                // Read Length CRC (4 bytes) - skipping detailed validation for speed/simplicity if wanted, but good to have
-                // const { bytesRead: lengthCrcBytesRead } = await this.fileHandle.read(crcBuffer, 0, 4, position);
-                // position += 4;
-                // ... validation logic similar to original reader ...
-                position += 4; // Skip CRC for now to move fast, or can implement if needed
+                // Skip Length CRC (4 bytes)
+                position += 4;
 
                 // Read Data
                 const dataBuffer = Buffer.alloc(dataLength);
@@ -51,20 +47,52 @@ class TFRecordsStreamReader {
                 if (dataBytesRead !== dataLength) throw new Error('Unexpected EOF reading data');
                 position += dataLength;
 
-                // Read Data CRC (4 bytes)
-                // const { bytesRead: dataCrcBytesRead } = await this.fileHandle.read(crcBuffer, 0, 4, position);
-                // position += 4;
-                position += 4; // Skip CRC
+                // Skip Data CRC (4 bytes)
+                position += 4;
 
                 // Deserialize
-                 // Optimization: TFRecordsImageMessage.deserializeBinary might be synchronous and CPU bound.
                 const imageMessage = TFRecordsImageMessage.deserializeBinary(dataBuffer);
                 yield imageMessage.toObject();
             }
         } finally {
-             // Auto-close on finish or error if the user breaks the loop
-            await this.close();
+             // Do NOT auto-close here if we plan to reuse the file handle for wrap-around.
+             // Rely on explicit close or garbage collection.
+             // But for safety, providing a manual close is better.
+             // If we rely on this iterator being the only user, we might want to close.
+             // But in random access mode, we might restart stream on same file.
         }
+    }
+
+    // Returns array of start positions (byte offsets) for each record
+    async indexRecords() {
+        if (!this.fileHandle) {
+            await this.open();
+        }
+
+        const offsets = [];
+        let position = 0;
+        const lengthBuffer = Buffer.alloc(8);
+
+        try {
+            while (true) {
+                // Read Length (8 bytes)
+                const { bytesRead: lengthBytesRead } = await this.fileHandle.read(lengthBuffer, 0, 8, position);
+                if (lengthBytesRead === 0) break; // EOF
+                if (lengthBytesRead < 8) throw new Error('Unexpected EOF reading length');
+
+                offsets.push(position);
+
+                const dataLength = readInt64(lengthBuffer);
+                
+                // Move position: 8 (Length) + 4 (Length CRC) + dataLength + 4 (Data CRC)
+                position += 8 + 4 + dataLength + 4;
+            }
+        } catch (error) {
+            console.error('Error indexing records:', error);
+            throw error;
+        }
+        
+        return offsets;
     }
 }
 

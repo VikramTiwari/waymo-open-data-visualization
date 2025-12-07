@@ -3,8 +3,7 @@ import { Scene } from './Scene';
 import { useRecordBuffer } from './hooks/useRecordBuffer';
 
 function App() {
-  const { data, isConnected, playNext, bufferSize } = useRecordBuffer('http://localhost:3000');
-
+  const { data, fileInfo, scenarioInfo, isConnected, playNext, bufferSize } = useRecordBuffer('http://localhost:3000');
 
   // No auto-play of records. User advances manually.
   
@@ -17,7 +16,7 @@ function App() {
 
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative' }}>
-      <Scene data={data} onFinished={() => {
+      <Scene data={data} fileInfo={fileInfo} scenarioInfo={scenarioInfo} onFinished={() => {
         console.log('Scenario finished, loading next...');
         playNext();
       }} />

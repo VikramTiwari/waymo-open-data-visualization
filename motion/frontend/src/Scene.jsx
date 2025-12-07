@@ -1,14 +1,13 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Canvas } from '@react-three/fiber';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import { RoadGraph } from './components/RoadGraph';
 import { Agents } from './components/Agents';
 import { CameraRig } from './components/CameraRig';
-import { CAMERA_VARIATIONS } from './components/cameraVariations';
 import { TrafficLights } from './components/TrafficLights';
 import { PathSamples } from './components/PathSamples';
 
-export function Scene({ data, onFinished }) {
+export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
   const [frame, setFrame] = useState(0);
   const [variant, setVariant] = useState(0);
   
@@ -110,53 +109,72 @@ export function Scene({ data, onFinished }) {
     return speeds;
   }, [data]);
 
-  // Auto-play loop
-  useEffect(() => {
-    if (!data) return;
-    
-    // Start loop
-    const interval = setInterval(() => {
-      setFrame(f => {
-        const next = f + 1;
-        if (next >= TOTAL_FRAMES) {
-            // Trigger finish, allowing parent to load next
-            // We use setTimeout to break the render cycle
-            if (onFinished) setTimeout(onFinished, 0); 
-            return 0; // Loop or wait? Let's loop until next data comes
-        }
-        return next;
+  const frameRef = useRef(0);
+  const [isPlaying, setIsPlaying] = useState(true);
+
+  // Animation Loop Component
+  const AnimationLoop = () => {
+      useFrame((state, delta) => {
+          if (!isPlaying) return;
+          
+          // Advance frame
+          // Data is 10Hz (0.1s per frame).
+          // We want 1 frame per 0.1s.
+          // speed = 10 frames per second.
+          const speed = 10; 
+          frameRef.current += delta * speed;
+
+          if (frameRef.current >= TOTAL_FRAMES) {
+             // Loop or Finish
+             if (onFinished) {
+                 onFinished();
+                 setIsPlaying(false); // Stop until reset
+             }
+             frameRef.current = TOTAL_FRAMES - 1; 
+          }
+
+          // Sync UI state every frame (or throttle if needed, but simple is fine for now)
+          // Flooring to avoid excessive updates if we checked strict equality?
+          // Actually, setting state 60fps is heavy. Let's set it only if integer changes.
+          const currentInt = Math.floor(frameRef.current);
+          setFrame(prev => {
+              if (prev !== currentInt) return currentInt;
+              return prev;
+          });
       });
-    }, 100); // 10Hz
+      return null;
+  };
 
-    return () => clearInterval(interval);
-  }, [data, onFinished]);
-
-  // Separate effect for data reset
+  // Reset when data changes
   useEffect(() => {
      if (data) {
+        frameRef.current = 0;
         setFrame(0);
-        setVariant(Math.floor(Math.random() * CAMERA_VARIATIONS.length));
+        setVariant(Math.floor(Math.random() * 100));
+        setIsPlaying(true);
      }
   }, [data]);
 
   return (
     <div style={{ width: '100%', height: '100vh', position: 'relative', background: 'black' }}>
-        <Canvas camera={{ position: [0, 0, 10], fov: 45, up: [0, 1, 0] }}> {/* Top-down view, centered on ego, close up */}
+        <Canvas camera={{ position: [0, 0, 10], fov: 45, up: [0, 1, 0] }}>
             <color attach="background" args={['#000']} />
             <ambientLight intensity={0.8} />
             <pointLight position={[50, 50, 100]} intensity={1} />
             <OrbitControls makeDefault />
+            <AnimationLoop />
             
             {data && <RoadGraph data={data} center={center} />}
             {data && <PathSamples data={data} center={center} />}
-            {data && <Agents data={data} frame={frame} center={center} />}
+            {data && <Agents data={data} frameRef={frameRef} center={center} />} 
             {data && <TrafficLights key="traffic-lights-spheres" data={data} frame={frame} center={center} />}
-            {data && <CameraRig data={data} frame={frame} center={center} variant={variant} />}
+            {data && <CameraRig data={data} frameRef={frameRef} center={center} variant={variant} />}
         </Canvas>
         
         {/* Minimal Info */}
         <div style={{ position: 'absolute', bottom: 20, left: 20, color: 'white', fontFamily: 'monospace', opacity: 0.7 }}>
-            <div>Scn: {scenarioId || 'Loading...'}</div>
+            <div>Scn: {scenarioInfo ? `${scenarioInfo.index}/${scenarioInfo.total} - ` : ''}{scenarioId || 'Loading...'}</div>
+            <div>File: {fileInfo ? `${fileInfo.index}/${fileInfo.total} - ${fileInfo.name}` : 'Loading...'}</div>
             <div>Frame: {frame} / {TOTAL_FRAMES}</div>
             <div>Speed: {sdcSpeeds[frame] ? sdcSpeeds[frame].toFixed(2) : '0.00'} m/s</div>
         </div>
