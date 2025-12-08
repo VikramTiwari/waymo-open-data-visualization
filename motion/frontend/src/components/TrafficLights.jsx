@@ -55,20 +55,29 @@ export function TrafficLights({ trafficLights, frameRef }) {
         bulbRef.current.instanceColor.needsUpdate = true;
     });
 
+    // Geometries with Offset (Pivot at base)
+    const geometries = React.useMemo(() => {
+        const box = new THREE.BoxGeometry(0.5, 0.5, 1.2);
+        box.translate(0, 0, 0.6); // Pivot at base Z=0, extends to Z=1.2
+        
+        const sphere = new THREE.SphereGeometry(0.3, 16, 16);
+        sphere.translate(0, 0, 0.9); // Center at Z=0.9 (near top of box)
+        
+        return { box, sphere };
+    }, []);
+
     return (
         <group>
             {/* Casing Instances */}
             {trafficLights.length > 0 && (
-                <instancedMesh ref={casingRef} args={[null, null, trafficLights.length]}>
-                    <boxGeometry args={[0.5, 0.5, 1.2]} />
+                <instancedMesh ref={casingRef} args={[geometries.box, null, trafficLights.length]}>
                     <meshStandardMaterial color="#222" />
                 </instancedMesh>
             )}
             
             {/* Bulb Instances */}
             {trafficLights.length > 0 && (
-                <instancedMesh ref={bulbRef} args={[null, null, trafficLights.length]}>
-                     <sphereGeometry args={[0.3, 16, 16]} />
+                <instancedMesh ref={bulbRef} args={[geometries.sphere, null, trafficLights.length]}>
                      <meshBasicMaterial toneMapped={false} />
                 </instancedMesh>
             )}

@@ -3,28 +3,28 @@ import { useThree, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
 const BASE_MODES = [
-    // Standard Follows
-    { name: 'Follow (High)', type: 'follow', offset: [0, -5, 10], lookAtOffset: [0, 5, 0] },
-    { name: 'Follow (Low)', type: 'follow', offset: [0, -8, 2], lookAtOffset: [0, 5, 1] },
+    // Standard Follows - High Priority (Good map visibility)
+    { name: 'Follow (High)', type: 'follow', offset: [0, -5, 10], lookAtOffset: [0, 5, 0], weight: 10 },
+    { name: 'Follow (Low)', type: 'follow', offset: [0, -8, 2], lookAtOffset: [0, 5, 1], weight: 3 },
     
-    // Technical / Mechanical
-    { name: 'Roof Cam (T-Cam)', type: 'relative', offset: [0, 0, 1.8], lookAtOffset: [0, 20, 0] }, // High enough to clear roof
-    { name: 'Under-Chassis', type: 'relative', offset: [0, 1.5, 0.3], lookAtOffset: [0, 10, 0.3] }, // Very low, forward
-    { name: 'Wheel Cam', type: 'relative', offset: [1.1, 0.8, 0.4], lookAtOffset: [1.1, 5, 0.4] },
+    // Technical / Mechanical - Low Priority (Focus on vehicle parts)
+    { name: 'Roof Cam (T-Cam)', type: 'relative', offset: [0, 0, 1.8], lookAtOffset: [0, 20, 0], weight: 1 },
+    { name: 'Under-Chassis', type: 'relative', offset: [0, 1.5, 0.3], lookAtOffset: [0, 10, 0.3], weight: 1 },
+    { name: 'Wheel Cam', type: 'relative', offset: [1.1, 0.8, 0.4], lookAtOffset: [1.1, 5, 0.4], weight: 1 },
     
-    // Interior / POV
-    { name: 'Driver POV', type: 'relative', offset: [-0.4, 0.2, 1.1], lookAtOffset: [0, 10, 1] },
-    { name: 'Passenger Seat', type: 'relative', offset: [0.4, 0.2, 1.1], lookAtOffset: [0, 10, 1] },
+    // Interior / POV - Low Priority
+    { name: 'Driver POV', type: 'relative', offset: [-0.4, 0.2, 1.1], lookAtOffset: [0, 10, 1], weight: 1 },
+    { name: 'Passenger Seat', type: 'relative', offset: [0.4, 0.2, 1.1], lookAtOffset: [0, 10, 1], weight: 1 },
     
-    // Broadcast / Cinemtic
-    { name: 'TV Helicopter', type: 'follow', offset: [15, -15, 15], lookAtOffset: [0, 10, 0] },
-    { name: 'Reverse Chase', type: 'relative', offset: [0, 10, 2], lookAtOffset: [0, -10, 1] },
-    { name: 'Cinematic Pan', type: 'fixed_track' }, // Logic handles position
-    { name: 'Spider Cam', type: 'orbit', radius: 20, height: 15, speed: 0.3 }, // Sweeping high angle
+    // Broadcast / Cinematic - High/Med Priority
+    { name: 'TV Helicopter', type: 'follow', offset: [15, -15, 15], lookAtOffset: [0, 10, 0], weight: 10 },
+    { name: 'Reverse Chase', type: 'relative', offset: [0, 10, 2], lookAtOffset: [0, -10, 1], weight: 3 },
+    { name: 'Cinematic Pan', type: 'fixed_track', weight: 5 }, 
+    { name: 'Spider Cam', type: 'orbit', radius: 20, height: 15, speed: 0.3, weight: 10 }, // Great map view
 
-    // Stylized
-    { name: 'Isometric (Arcade)', type: 'isometric', offset: [20, -20, 20] }, // Fixed world offset
-    { name: 'Top Down (Static)', type: 'static_top', height: 40 },
+    // Stylized - High Priority
+    { name: 'Isometric (Arcade)', type: 'isometric', offset: [20, -20, 20], weight: 8 }, 
+    { name: 'Top Down (Static)', type: 'static_top', height: 40, weight: 8 },
 ];
 
 export function CameraRig({ map, frameRef, center, variant, isAuto = true, onCameraChange }) {
@@ -88,13 +88,30 @@ export function CameraRig({ map, frameRef, center, variant, isAuto = true, onCam
                 availableModes.push({ 
                     name: 'Pedestrian POV', 
                     type: 'pedestrian', 
-                    targetIndex: scenarioData.pedestrianIndices[i % scenarioData.pedestrianIndices.length] 
+                    targetIndex: scenarioData.pedestrianIndices[i % scenarioData.pedestrianIndices.length],
+                    weight: 5 // Medium priority for interesting event
                 });
             }
         }
 
-        const idx = variant % availableModes.length;
-        const selected = availableModes[idx];
+        // Weighted Selection
+        let totalWeight = 0;
+        availableModes.forEach(m => totalWeight += (m.weight || 1));
+        
+        // Use variant as seed for deterministic selection
+        // Ensure variant is positive integer
+        const seed = Math.abs(Math.floor(variant));
+        let selectionValue = seed % totalWeight;
+        
+        let selected = availableModes[0];
+        for (const mode of availableModes) {
+            const w = mode.weight || 1;
+            if (selectionValue < w) {
+                selected = mode;
+                break;
+            }
+            selectionValue -= w;
+        }
         
         // If Fixed Track, we need to pick a spot relative to Start
         // But we want it to be somewhat random per scenario play.

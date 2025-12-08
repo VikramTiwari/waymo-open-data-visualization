@@ -169,16 +169,16 @@ export const Crosswalks = React.memo(({ crosswalks }) => {
     if (!mergedGeometry) return null;
 
     return (
-        <mesh geometry={mergedGeometry}>
+        <mesh geometry={mergedGeometry} position={[0, 0, 0.03]} renderOrder={2}>
             {/* 
                polygonOffset is crucial to prevent z-fighting with the road surface.
-               factor -1 pulls it TOWARDS the camera (on top of road).
+               factor 2 aligns with Markings.
             */}
             <zebraMaterial 
                 transparent 
                 side={THREE.DoubleSide} 
                 polygonOffset 
-                polygonOffsetFactor={-1} 
+                polygonOffsetFactor={2} 
             />
         </mesh>
     );

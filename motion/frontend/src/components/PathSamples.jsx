@@ -15,7 +15,7 @@ function PathSamplesComponent({ vertices }) {
 
     return (
         <lineSegments geometry={geometry}>
-            <lineBasicMaterial color="#00FFFF" opacity={0.5} transparent />
+            <lineBasicMaterial color="#00FFFF" opacity={0.05} transparent />
         </lineSegments>
     );
 }

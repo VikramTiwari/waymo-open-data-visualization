@@ -7,7 +7,7 @@ import { Crosswalks } from './Crosswalks';
 // Standard lane width in meters
 const LANE_WIDTH = 3.8;
 
-function createRibbonGeometry(points, width, isDashed = false, dashSize = 2, gapSize = 1.5) {
+function createRibbonGeometry(points, width, isDashed = false, dashSize = 2, gapSize = 1.5, zOffset = 0) {
     if (points.length < 2) return null;
 
     const vertices = [];
@@ -34,13 +34,13 @@ function createRibbonGeometry(points, width, isDashed = false, dashSize = 2, gap
         const baseIdx = vertices.length / 3;
 
         // P1 Left
-        vertices.push(p1.x + dx, p1.y + dy, p1.z);
+        vertices.push(p1.x + dx, p1.y + dy, p1.z + zOffset);
         // P1 Right 
-        vertices.push(p1.x - dx, p1.y - dy, p1.z);
+        vertices.push(p1.x - dx, p1.y - dy, p1.z + zOffset);
         // P2 Left
-        vertices.push(p2.x + dx, p2.y + dy, p2.z);
+        vertices.push(p2.x + dx, p2.y + dy, p2.z + zOffset);
         // P2 Right
-        vertices.push(p2.x - dx, p2.y - dy, p2.z);
+        vertices.push(p2.x - dx, p2.y - dy, p2.z + zOffset);
 
         // UVs (Simple 0-1)
         uvs.push(0, 0);
@@ -119,8 +119,8 @@ function createRibbonGeometry(points, width, isDashed = false, dashSize = 2, gap
             const dx = normal.x * width / 2;
             const dy = normal.y * width / 2;
 
-            vertices.push(p.x + dx, p.y + dy, p.z); // Left
-            vertices.push(p.x - dx, p.y - dy, p.z); // Right
+            vertices.push(p.x + dx, p.y + dy, p.z + zOffset); // Left
+            vertices.push(p.x - dx, p.y - dy, p.z + zOffset); // Right
             
             uvs.push(0, 0);
             uvs.push(1, 0);
@@ -196,7 +196,8 @@ function RoadGraphComponent({ map, center }) {
         // Pre-calculate speed bump geometries
         const speedBumpsList = Object.values(speedBumpsMap).map(points => {
             if (points.length < 2) return null;
-            const geo = createRibbonGeometry(points, 0.4);
+            // Bumps slightly elevated
+            const geo = createRibbonGeometry(points, 0.4, false, 0, 0, 0.05);
             if (!geo) return null;
             return { geometry: geo };
         }).filter(Boolean);
@@ -236,7 +237,8 @@ function RoadGraphComponent({ map, center }) {
             const style = getLaneStyle(type);
 
             pointsList.forEach(points => {
-                 const geo = createRibbonGeometry(points, style.width, false);
+                 // Lanes at Z=0 relative to road surface
+                 const geo = createRibbonGeometry(points, style.width, false, 0, 0, 0);
                  if (geo) geometries.push(geo);
             });
 
@@ -271,7 +273,8 @@ function RoadGraphComponent({ map, center }) {
             else if (style.width >= 4) meterWidth = 0.3;
             else if (style.width >= 2) meterWidth = 0.15;
             
-            const geo = createRibbonGeometry(seg.points, meterWidth, style.dash, style.dashSize, style.gapSize);
+            // Markings slightly elevated +0.02
+            const geo = createRibbonGeometry(seg.points, meterWidth, style.dash, style.dashSize, style.gapSize, 0.02);
             if (geo) groups[key].geometries.push(geo);
         });
         
@@ -290,13 +293,19 @@ function RoadGraphComponent({ map, center }) {
     // --- STOP SIGNS ---
     const stopSignMesh = useMemo(() => {
         if (stopSigns.length === 0) return null;
+        // Octagonal Prism, rotated to lie flat, elevated to sit on ground
         const geom = new THREE.CylinderGeometry(0.8, 0.8, 0.05, 8);
+        geom.rotateX(Math.PI / 2); // Align with Z-up (lying flat)
+        geom.translate(0, 0, 0.025); // Sit on ground (Z=0 to 0.05)
+        
         const mat = new THREE.MeshBasicMaterial({ color: '#ff0000' });
         const mesh = new THREE.InstancedMesh(geom, mat, stopSigns.length);
         
         const dummy = new THREE.Object3D();
         stopSigns.forEach((sign, i) => {
             dummy.position.copy(sign.pos);
+            // Ensure no rotation overrides alignment
+            dummy.rotation.set(0,0,0);
             dummy.updateMatrix();
             mesh.setMatrixAt(i, dummy.matrix);
         });
@@ -316,7 +325,8 @@ function RoadGraphComponent({ map, center }) {
                         opacity={style.opacity} 
                         side={THREE.DoubleSide}
                         polygonOffset
-                        polygonOffsetFactor={2}
+                        polygonOffsetFactor={4}
+                        depthWrite={false} // Prevent Z-fighting on overlaps
                         roughness={0.8}
                         metalness={0.2}
                     />
@@ -325,24 +335,14 @@ function RoadGraphComponent({ map, center }) {
 
             {/* Merged Markings */}
             {mergedMarkings.map((group, idx) => (
-                 <mesh key={`mark-group-${idx}`} geometry={group.geometry}>
-                    <meshStandardMaterial 
+                 <mesh key={`mark-group-${idx}`} geometry={group.geometry} renderOrder={1}>
+                     <meshStandardMaterial 
                         color={group.style.color} 
                         transparent={true}
                         opacity={group.style.opacity}
                         side={THREE.DoubleSide}
                         polygonOffset
-                        polygonOffsetFactor={1} // On top of lanes (factor 2)
-                        // Wait, polygonOffsetFactor: larger factor = pushed BACK.
-                        // We want Markings (1) ON TOP of Lanes (2).
-                        // So Lanes should be pushed back more? No.
-                        // Factor > 0 pushes away from camera.
-                        // We want Markings on Top (closer). So Markings factor < Lanes factor.
-                        // Standard: Ground (0), Markings (-1), Objects (-2).
-                        // Let's adjust.
-                        // Lanes: Factor 2 (Pushed back).
-                        // Markings: Factor 1 (Pushed back less -> on top of Lanes).
-                        // Correct.
+                        polygonOffsetFactor={2} // Markings (2) vs Lanes (4)
                         roughness={0.5}
                         metalness={0.1}
                     />
@@ -367,7 +367,7 @@ export const RoadGraph = React.memo(RoadGraphComponent);
 function getLaneStyle(type) {
     switch(type) {
         case 3: // Bike Lane
-            return { color: '#2ECC71', width: 2.0, opacity: 0.6 };
+            return { color: '#145A32', width: 2.0, opacity: 0.4 };
         case 1: // Freeway
         case 2: // Surface Street
         default:

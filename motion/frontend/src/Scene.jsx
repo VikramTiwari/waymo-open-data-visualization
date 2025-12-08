@@ -87,32 +87,51 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
     if (sdcIndex === -1) return [];
 
     // 2. Get Speed Data
+    // 2. Get Velocity Data instead of Speed
     const getVal = (key) => {
         const feat = parsedMap.get(key);
         return feat?.floatList?.valueList || [];
     }
     
-    const pastSpeed = getVal('state/past/speed');
-    const currSpeed = getVal('state/current/speed');
-    const futureSpeed = getVal('state/future/speed');
+    // Past
+    const pastVx = getVal('state/past/velocity_x');
+    const pastVy = getVal('state/past/velocity_y');
+    
+    // Current
+    const currVx = getVal('state/current/velocity_x');
+    const currVy = getVal('state/current/velocity_y');
+    
+    // Future
+    const futureVx = getVal('state/future/velocity_x');
+    const futureVy = getVal('state/future/velocity_y');
     
     const count = sdcList.length;
     
     // Derived lengths
-    const pastLen = pastSpeed.length / count; 
-    const futureLen = futureSpeed.length / count;
+    const pastLen = pastVx.length / count; 
+    const futureLen = futureVx.length / count;
 
     const speeds = [];
 
     // Past
     for (let t = 0; t < pastLen; t++) {
-        speeds.push(pastSpeed[sdcIndex * pastLen + t] || 0);
+        const idx = sdcIndex * pastLen + t;
+        const vx = pastVx[idx] || 0;
+        const vy = pastVy[idx] || 0;
+        speeds.push(Math.sqrt(vx*vx + vy*vy));
     }
     // Current
-    speeds.push(currSpeed[sdcIndex] || 0);
+    {
+        const vx = currVx[sdcIndex] || 0;
+        const vy = currVy[sdcIndex] || 0;
+        speeds.push(Math.sqrt(vx*vx + vy*vy));
+    }
     // Future
     for (let t = 0; t < futureLen; t++) {
-        speeds.push(futureSpeed[sdcIndex * futureLen + t] || 0);
+        const idx = sdcIndex * futureLen + t;
+        const vx = futureVx[idx] || 0;
+        const vy = futureVy[idx] || 0;
+        speeds.push(Math.sqrt(vx*vx + vy*vy));
     }
     
     return speeds;
@@ -185,13 +204,16 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
         const trajectory = [];
         
         const pushStep = (rawX, rawY, rawZ, rawYaw, rawVx, rawVy) => {
+             const vx = rawVx || 0;
+             const vy = rawVy || 0;
              trajectory.push({
                 x: rawX - cx,
                 y: rawY - cy,
                 z: rawZ - cz,
                 yaw: rawYaw || 0,
-                vx: rawVx || 0,
-                vy: rawVy || 0
+                vx: vx,
+                vy: vy,
+                speed: Math.sqrt(vx*vx + vy*vy)
             });
         };
 
@@ -432,18 +454,21 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
     const pastX = getVal('state/past/x');
     const pastY = getVal('state/past/y');
     const pastZ = getVal('state/past/z');
-    const pastSpeed = getVal('state/past/speed'); // For Highlight
+    const pastVx = getVal('state/past/velocity_x');
+    const pastVy = getVal('state/past/velocity_y');
     
     const currX = getVal('state/current/x');
     const currY = getVal('state/current/y');
     const currZ = getVal('state/current/z');
-    const currSpeed = getVal('state/current/speed');
+    const currVx = getVal('state/current/velocity_x');
+    const currVy = getVal('state/current/velocity_y');
     const heightList = getVal('state/current/height');
     
     const futureX = getVal('state/future/x');
     const futureY = getVal('state/future/y');
     const futureZ = getVal('state/future/z');
-    const futureSpeed = getVal('state/future/speed');
+    const futureVx = getVal('state/future/velocity_x');
+    const futureVy = getVal('state/future/velocity_y');
     
     const sdcHeight = heightList[sdcIndex] || 1.6;
     
@@ -456,35 +481,41 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
     // Past
     for (let t = 0; t < pastLen; t++) {
          const idx = sdcIndex * pastLen + t;
+         const vx = pastVx[idx] || 0;
+         const vy = pastVy[idx] || 0;
          trajectory.push({
             x: pastX[idx] - cx,
             y: pastY[idx] - cy,
             z: pastZ[idx] - cz,
             zBox: pastZ[idx] - cz - (sdcHeight / 2),
-            speed: pastSpeed[idx] || 0
+            speed: Math.sqrt(vx*vx + vy*vy)
          });
     }
 
     // Current
     if (currX[sdcIndex] !== undefined) {
+         const vx = currVx[sdcIndex] || 0;
+         const vy = currVy[sdcIndex] || 0;
          trajectory.push({
             x: currX[sdcIndex] - cx,
             y: currY[sdcIndex] - cy,
             z: currZ[sdcIndex] - cz,
             zBox: currZ[sdcIndex] - cz - (sdcHeight / 2),
-            speed: currSpeed[sdcIndex] || 0
+            speed: Math.sqrt(vx*vx + vy*vy)
          });
     }
 
     // Future
     for (let t = 0; t < futureLen; t++) {
          const idx = sdcIndex * futureLen + t;
+         const vx = futureVx[idx] || 0;
+         const vy = futureVy[idx] || 0;
          trajectory.push({
             x: futureX[idx] - cx,
             y: futureY[idx] - cy,
             z: futureZ[idx] - cz,
             zBox: futureZ[idx] - cz - (sdcHeight / 2),
-            speed: futureSpeed[idx] || 0
+            speed: Math.sqrt(vx*vx + vy*vy)
          });
     }
     
@@ -559,9 +590,8 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
             {parsedMap && <RoadGraph map={parsedMap} center={center} />}
             {parsedMap && <SdcPathHighlight sdcState={parsedSdcState} frameRef={frameRef} />}
             {parsedPathSamples && <PathSamples vertices={parsedPathSamples} />}
-            {parsedMap && <Agents agents={parsedAgents} frameRef={frameRef} />} 
+            {parsedMap && <Agents agents={parsedAgents} trafficLights={parsedTrafficLights} frameRef={frameRef} />} 
             {parsedTrafficLights && <TrafficLights key="traffic-lights-spheres" trafficLights={parsedTrafficLights} frameRef={frameRef} />}
-            {parsedSdcState && parsedTrafficLights && <TrafficLightHighlight sdcState={parsedSdcState} trafficLights={parsedTrafficLights} frameRef={frameRef} />}
             {(() => {
                  // Optimization: Params are checked inside render.
                  // It's fast enough, but cleaner to extract if we want perfectly clean render.

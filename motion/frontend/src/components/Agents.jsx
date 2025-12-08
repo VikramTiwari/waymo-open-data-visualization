@@ -1,5 +1,6 @@
 import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
+import { Billboard } from '@react-three/drei';
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { WaymoCar } from './WaymoCar';
@@ -123,8 +124,23 @@ function createCyclistGeometries() {
 const PED_GEOS = createPedestrianGeometries();
 const CYC_GEOS = createCyclistGeometries();
 
+// Arrow Geometry for Instancing (Merged Box + Cone, facing +X)
+function createArrowGeometry() {
+    // Shaft (Box)
+    const shaft = new THREE.BoxGeometry(1, 0.08, 0.08);
+    shaft.translate(0.5, 0, 0); // 0 to 1
+    
+    // Head (Cone)
+    const head = new THREE.ConeGeometry(0.15, 0.4, 8);
+    head.rotateZ(-Math.PI / 2); // Point to +X
+    head.translate(1.2, 0, 0); // slightly after shaft end
+    
+    return BufferGeometryUtils.mergeGeometries([shaft, head]);
+}
+const ARROW_GEO = createArrowGeometry();
 
-export function Agents({ agents, frameRef }) {
+
+export function Agents({ agents, trafficLights, frameRef }) {
 
     // Split Agents
     const { sdc, peds, cyclists, vehicles, others } = useMemo(() => {
@@ -152,7 +168,9 @@ export function Agents({ agents, frameRef }) {
     }, [agents]);
 
     // --- INSTANCING REFS ---
+    // --- INSTANCING REFS ---
     const vehicleMeshRef = useRef();
+    const vehicleArrowRef = useRef(); // New Ref for Arrows
     
     // Peds Refs
     const pedPantsRef = useRef();
@@ -227,11 +245,15 @@ export function Agents({ agents, frameRef }) {
              vehicles.forEach((agent, i) => {
                  const st = getAgentState(agent);
                  if(!st) {
+                     // Hide vehicle
                      TEMP_OBJECT.scale.set(0,0,0);
                      TEMP_OBJECT.updateMatrix();
                      vehicleMeshRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
+                     if (vehicleArrowRef.current) vehicleArrowRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
                      return;
                  }
+                 
+                 // Update Vehicle Body
                  TEMP_OBJECT.position.set(st.x, st.y, st.z);
                  TEMP_OBJECT.rotation.set(0, 0, st.yaw);
                  TEMP_OBJECT.scale.set(agent.dims[0], agent.dims[1], agent.dims[2]);
@@ -241,9 +263,33 @@ export function Agents({ agents, frameRef }) {
                  const color = agent.isParked ? "#abcbfd" : getTypeColor(agent.type);
                  TEMP_COLOR.set(color);
                  vehicleMeshRef.current.setColorAt(i, TEMP_COLOR);
+
+                 // Update Vehicle Arrow
+                 if (vehicleArrowRef.current) {
+                     const speed = Math.sqrt(st.vx*st.vx + st.vy*st.vy);
+                     if (speed > 0.5 && !agent.isParked) {
+                         const arrowYaw = Math.atan2(st.vy, st.vx);
+                         TEMP_OBJECT.position.set(st.x, st.y, st.z + 2.5); // Elevate 2.5m above ground
+                         TEMP_OBJECT.rotation.set(0, 0, arrowYaw);
+                         // Scale length by speed, clamp min
+                         const len = Math.max(speed * 0.5, 1.0);
+                         TEMP_OBJECT.scale.set(len, 1, 1);
+                         TEMP_OBJECT.updateMatrix();
+                         vehicleArrowRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
+                     } else {
+                         // Hide
+                         TEMP_OBJECT.scale.set(0,0,0);
+                         TEMP_OBJECT.updateMatrix();
+                         vehicleArrowRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
+                     }
+                 }
              });
              vehicleMeshRef.current.instanceMatrix.needsUpdate = true;
              if(vehicleMeshRef.current.instanceColor) vehicleMeshRef.current.instanceColor.needsUpdate = true;
+             
+             if (vehicleArrowRef.current) {
+                 vehicleArrowRef.current.instanceMatrix.needsUpdate = true;
+             }
         }
 
         // Pedestrians
@@ -292,20 +338,26 @@ export function Agents({ agents, frameRef }) {
         <group>
             {/* SDC (Special) */}
             {sdc.map((agent) => (
-                <AgentItem key={`sdc-${agent.id}`} agent={agent} frameRef={frameRef} />
+                <AgentItem key={`sdc-${agent.id}`} agent={agent} trafficLights={trafficLights} frameRef={frameRef} />
             ))}
             
             {/* Others (Special) - fallback */}
-            {others.map((agent) => (
-                 <AgentItem key={`other-${agent.id}`} agent={agent} frameRef={frameRef} />
+            {others.map((agent, index) => (
+                 <AgentItem key={`other-${agent.id}-${index}`} agent={agent} frameRef={frameRef} />
             ))}
             
             {/* Vehicles */}
             {vehicles.length > 0 && (
-                <instancedMesh ref={vehicleMeshRef} args={[null, null, vehicles.length]}>
-                    <boxGeometry args={[1, 1, 1]} />
-                    <meshStandardMaterial />
-                </instancedMesh>
+                <group>
+                    <instancedMesh ref={vehicleMeshRef} args={[null, null, vehicles.length]}>
+                        <boxGeometry args={[1, 1, 1]} />
+                        <meshStandardMaterial />
+                    </instancedMesh>
+                    {/* Instanced Arrows for Vehicles - Muted Color but visible */}
+                    <instancedMesh ref={vehicleArrowRef} args={[ARROW_GEO, null, vehicles.length]}>
+                         <meshBasicMaterial color="#999" transparent opacity={0.8} />
+                    </instancedMesh>
+                </group>
             )}
             
             {/* Pedestrians */}
@@ -344,10 +396,16 @@ export function Agents({ agents, frameRef }) {
     );
 }
 
-function AgentItem({ agent, frameRef }) {
+function AgentItem({ agent, trafficLights, frameRef }) {
     const groupRef = useRef();
     const arrowRef = useRef();
     const bodyRef = useRef();
+    const bubbleRef = useRef();
+    
+    // Bubble Logic Refs
+    const visibleRef = useRef(false);
+    const lastSeenFrameRef = useRef(-100);
+
     const [isBraking, setIsBraking] = React.useState(false);
 
     useFrame(() => {
@@ -366,7 +424,9 @@ function AgentItem({ agent, frameRef }) {
         }
         if (groupRef.current) groupRef.current.visible = true;
 
-        let x, y, z, yaw, vx, vy, accel;
+        let x, y, z, yaw, vx, vy, accel, speed;
+        
+        // Linear Interpolation for smoothness
         if (step2 && step1 !== step2) {
              x = THREE.MathUtils.lerp(step1.x, step2.x, alpha);
              y = THREE.MathUtils.lerp(step1.y, step2.y, alpha);
@@ -378,10 +438,13 @@ function AgentItem({ agent, frameRef }) {
              vx = THREE.MathUtils.lerp(step1.vx, step2.vx, alpha);
              vy = THREE.MathUtils.lerp(step1.vy, step2.vy, alpha);
              accel = THREE.MathUtils.lerp(step1.accel || 0, step2.accel || 0, alpha);
+             // Interpolate speed for smooth logic
+             speed = THREE.MathUtils.lerp(step1.speed || 0, step2.speed || 0, alpha);
         } else {
              x = step1.x; y = step1.y; z = step1.z;
              yaw = step1.yaw; vx = step1.vx; vy = step1.vy;
              accel = step1.accel || 0;
+             speed = step1.speed || 0;
         }
 
         if (groupRef.current) groupRef.current.position.set(x, y, z);
@@ -391,7 +454,6 @@ function AgentItem({ agent, frameRef }) {
         if (brakingNow !== isBraking) setIsBraking(brakingNow);
 
         if (arrowRef.current) {
-            const speed = Math.sqrt(vx*vx + vy*vy);
             if (speed > 0.5) {
                 arrowRef.current.visible = true;
                 const arrowYaw = Math.atan2(vy, vx);
@@ -401,8 +463,72 @@ function AgentItem({ agent, frameRef }) {
                 arrowRef.current.visible = false;
             }
         }
+        
+        // --- TRAFFIC LIGHT BUBBLE LOGIC (SDC Only) ---
+        if (agent.isSdc && bubbleRef.current && trafficLights) {
+            // Hysteresis
+            let speedCondition = false;
+            if (visibleRef.current) {
+                if (speed < 0.5) speedCondition = true;
+            } else {
+                if (speed < 0.2) speedCondition = true;
+            }
+
+            let foundRedLight = false;
+            if (speedCondition) {
+                const RED_STATES = [1, 4, 7];
+                // Car Forward Vector
+                const carFx = Math.cos(yaw);
+                const carFy = Math.sin(yaw);
+
+                // Scan lights
+                for (const light of trafficLights) {
+                     // Check light state at CURRENT FRAME (floor)
+                     const safeLightFrame = Math.min(Math.max(0, idx1), light.trajectory.length - 1);
+                     const lStep = light.trajectory[safeLightFrame];
+                     const state = lStep ? lStep.state : 0;
+
+                     if (RED_STATES.includes(state)) {
+                         const dx = light.x - x;
+                         const dy = light.y - y;
+                         const distSq = dx*dx + dy*dy;
+                         
+                         // < 30m
+                         if (distSq < 900) {
+                             // Dot Product (FoV 120 deg)
+                             const len = Math.sqrt(distSq);
+                             const dot = carFx * (dx/len) + carFy * (dy/len);
+                             if (dot > 0.5) {
+                                 foundRedLight = true;
+                                 break;
+                             }
+                         }
+                     }
+                }
+            }
+            
+            // Debounce
+            if (foundRedLight) lastSeenFrameRef.current = currentFrame;
+            
+            let show = false;
+            if (foundRedLight) show = true;
+            else if (currentFrame - lastSeenFrameRef.current < 30) show = true;
+
+            // Strict Speed Cutoff
+            if (!speedCondition && visibleRef.current) show = false;
+
+            if (show !== visibleRef.current) {
+                bubbleRef.current.visible = show;
+                visibleRef.current = show;
+            }
+        }
     });
     
+    // We need Billboard from Drei for the bubble
+    // Wait, Billboard might not be imported in Agents.jsx.
+    // I need to check imports.
+    // Assuming I can add the bubble mesh groupRef first.
+
     return (
         <group ref={groupRef}>
              <group ref={bodyRef}>
@@ -415,17 +541,36 @@ function AgentItem({ agent, frameRef }) {
                     </mesh>
                 )}
              </group>
-             {/* Velocity Arrow */}
-             <group ref={arrowRef} visible={false}>
+             {/* Velocity Arrow - Elevated */}
+             <group ref={arrowRef} visible={false} position={[0, 0, 2.5]}>
                  <mesh position={[0.5, 0, 0]}>
                      <boxGeometry args={[1, 0.1, 0.1]} />
-                     <meshBasicMaterial color={agent.isSdc ? "#00FFFF" : "#FFEB3B"} />
+                     <meshBasicMaterial color={agent.isSdc ? "#00FFFF" : "#999"} opacity={agent.isSdc ? 1 : 0.8} transparent={!agent.isSdc} />
                  </mesh>
                  <mesh position={[1, 0, 0]} rotation={[0, 0, -Math.PI / 2]}>
                      <coneGeometry args={[0.2, 0.5, 8]} />
-                     <meshBasicMaterial color={agent.isSdc ? "#00FFFF" : "#FFEB3B"} />
+                     <meshBasicMaterial color={agent.isSdc ? "#00FFFF" : "#999"} opacity={agent.isSdc ? 1 : 0.8} transparent={!agent.isSdc} />
                  </mesh>
              </group>
+             
+             {/* SDC Thought Bubble (Attached to Group) */}
+             {agent.isSdc && (
+                <group ref={bubbleRef} visible={false} position={[0, 0, 2.2]}>
+                    <Billboard follow={true} lockX={false} lockY={false} lockZ={false}>
+                        <group scale={0.8} name="bubble-visual">
+                             <mesh position={[0, 0, 0]}> 
+                                 <circleGeometry args={[0.5, 32]} />
+                                 <meshBasicMaterial color="white" transparent opacity={0.9} />
+                             </mesh>
+                             <mesh position={[0, 0, 0.01]}> 
+                                <planeGeometry args={[0.4, 0.4]} />
+                                <meshBasicMaterial color="red" />
+                             </mesh>
+                        </group>
+                    </Billboard>
+                </group>
+             )}
+
              {agent.isSdc && (
                  <mesh position={[0, 0, -0.7]} rotation={[0, 0, 0]}>
                     <ringGeometry args={[2.0, 2.5, 32]} />
@@ -433,6 +578,7 @@ function AgentItem({ agent, frameRef }) {
                  </mesh>
              )}
         </group>
+
     );
 }
 
