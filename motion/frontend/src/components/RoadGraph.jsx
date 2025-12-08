@@ -7,7 +7,7 @@ import { Crosswalks } from './Crosswalks';
 const LANE_WIDTH = 3.8;
 
 // LaneRibbon component to render a flat ribbon on the ground
-const LaneRibbon = React.memo(({ points, width = LANE_WIDTH, color = '#555555', opacity = 0.8 }) => {
+const LaneRibbon = React.memo(({ points, width = LANE_WIDTH, color = '#555555', opacity = 0.8, depth = 0.5 }) => {
     const geometry = useMemo(() => {
         if (points.length < 2) return null;
 
@@ -20,7 +20,7 @@ const LaneRibbon = React.memo(({ points, width = LANE_WIDTH, color = '#555555', 
         const indices = [];
         const uvs = [];
 
-        // For each point, calculate left and right positions based on tangent
+        // For each point, calculate left and right positions
         for (let i = 0; i < curvePoints.length; i++) {
             const p = curvePoints[i];
             
@@ -35,30 +35,79 @@ const LaneRibbon = React.memo(({ points, width = LANE_WIDTH, color = '#555555', 
             }
 
             // Calculate normal (perpendicular to tangent on XY plane - Z up)
+            // This normal gives us the "width" direction
             // Rotate tangent 90 degrees around Z axis: (-y, x, 0)
             const normal = new THREE.Vector3(-tangent.y, tangent.x, 0).normalize();
 
-            // Left and Right vertices
-            const left = new THREE.Vector3().copy(p).addScaledVector(normal, width / 2);
-            const right = new THREE.Vector3().copy(p).addScaledVector(normal, -width / 2);
+            // Calculate "Up" vector for the slab thickness
+            // We want thickness to be perpendicular to the road surface
+            // The road surface normal is Cross(tangent, normal)
+            const up = new THREE.Vector3().crossVectors(tangent, normal).normalize();
+            // Ensure up is generally pointing positive Z
+            if (up.z < 0) up.negate();
 
-            // Add vertices
-            vertices.push(left.x, left.y, left.z); // Even indices (0, 2, 4...)
-            vertices.push(right.x, right.y, right.z); // Odd indices (1, 3, 5...)
+            // Top surface vertices
+            const leftTop = new THREE.Vector3().copy(p).addScaledVector(normal, width / 2);
+            const rightTop = new THREE.Vector3().copy(p).addScaledVector(normal, -width / 2);
+            
+            // Bottom surface vertices (offset by depth/thickness)
+            // We subtract depth * up vector
+            const leftBottom = new THREE.Vector3().copy(leftTop).addScaledVector(up, -depth);
+            const rightBottom = new THREE.Vector3().copy(rightTop).addScaledVector(up, -depth);
 
-            // UVs (simple mapping along length)
+            // Add vertices for this slice
+            // We need multiple vertices per position to have sharp edges (normals need to be different)
+            // But for a smooth ribbon we might share them.
+            // However, to get a boxy look, we need distinct faces.
+            // For one continuous mesh, we can just push 4 points per slice?
+            // Wait, for flat shading or sharp edges, we need separate vertices or we need to be careful with normals.
+            // Given we are using computeVertexNormals(), if we share vertices, it will smooth the edges.
+            // We want the top to be smooth along the curve, but the edge between top and side to be sharp.
+            // This requires duplicating vertices or using groups.
+            // Simplest approach for "slab" with sharp edges: 
+            // 3 separate geometries (Top, Bottom, Sides) merged? 
+            // Or just one geometry with split vertices.
+            
+            // To keep it simple and performant enough: 
+            // We'll generate a "cylinder-like" structure but with hard edges.
+            
+            // Actually, let's just make it one smooth mesh for now, but focus on the shape.
+            // If it looks too round, we can split it.
+            // Let's try shared vertices first, it's efficient.
+            
+            // Vertex layout per slice: 0:LT, 1:RT, 2:LB, 3:RB
+            vertices.push(
+                leftTop.x, leftTop.y, leftTop.z,        // 0
+                rightTop.x, rightTop.y, rightTop.z,     // 1
+                leftBottom.x, leftBottom.y, leftBottom.z, // 2
+                rightBottom.x, rightBottom.y, rightBottom.z // 3
+            );
+
+            // UVs
             const u = i / (curvePoints.length - 1);
-            uvs.push(0, u);
-            uvs.push(1, u);
+            uvs.push(0, u, 1, u, 0, u, 1, u); // Simplified UVs for bottom too
 
             // Indices
             if (i < curvePoints.length - 1) {
-                const base = i * 2;
-                // Two triangles for the quad
-                // 0, 1, 2 (Left Current, Right Current, Left Next)
-                indices.push(base, base + 1, base + 2);
-                // 2, 1, 3 (Left Next, Right Current, Right Next)
-                indices.push(base + 2, base + 1, base + 3);
+                const base = i * 4;
+                const nextBase = (i + 1) * 4;
+
+                // Top Face (LT, RT, NextLT, NextRT) -> (0, 1, 4, 5)
+                indices.push(base + 0, base + 1, nextBase + 0);
+                indices.push(nextBase + 0, base + 1, nextBase + 1);
+
+                // Bottom Face (LB, RB, NextLB, NextRB) -> (2, 3, 6, 7)
+                // Winding order reversed so it faces down
+                indices.push(base + 2, nextBase + 2, base + 3);
+                indices.push(base + 3, nextBase + 2, nextBase + 3);
+
+                // Left Side Face (LT, LB, NextLT, NextLB) -> (0, 2, 4, 6)
+                indices.push(base + 0, nextBase + 0, base + 2);
+                indices.push(base + 2, nextBase + 0, nextBase + 2);
+
+                // Right Side Face (RT, RB, NextRT, NextRB) -> (1, 3, 5, 7)
+                indices.push(base + 1, base + 3, nextBase + 1);
+                indices.push(nextBase + 1, base + 3, nextBase + 3);
             }
         }
 
@@ -66,10 +115,15 @@ const LaneRibbon = React.memo(({ points, width = LANE_WIDTH, color = '#555555', 
         geo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
         geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
         geo.setIndex(indices);
+        
+        // Improve appearance by splitting vertices to get flat shading on sides?
+        // computeVertexNormals will smooth everything.
+        // For distinct "slab" look, we really should have used separate vertices for Top vs Side.
+        // But let's see how it looks. If it looks like a tube, we fix it.
         geo.computeVertexNormals();
 
         return geo;
-    }, [points, width]);
+    }, [points, width, depth]);
 
     if (!geometry) return null;
 
@@ -81,7 +135,9 @@ const LaneRibbon = React.memo(({ points, width = LANE_WIDTH, color = '#555555', 
                 opacity={opacity} 
                 side={THREE.DoubleSide}
                 polygonOffset
-                polygonOffsetFactor={1} // Push back slightly to let markings render on top
+                polygonOffsetFactor={1}
+                roughness={0.8}
+                metalness={0.2}
             />
         </mesh>
     );
@@ -192,6 +248,7 @@ function RoadGraphComponent({ data, center }) {
                         width={style.width}
                         color={style.color}
                         opacity={style.opacity}
+                        depth={1.0} // Thickness of the road slab
                     />
                 );
             })}
