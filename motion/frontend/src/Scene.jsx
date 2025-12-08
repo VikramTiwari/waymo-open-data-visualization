@@ -170,7 +170,7 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
   return (
     <div style={{ width: '100%', height: '100vh', position: 'relative', background: 'black' }}>
         <Canvas camera={{ position: [0, -20, 20], fov: 45, up: [0, 0, 1] }}>
-            <color attach="background" args={['#000']} />
+            <color attach="background" args={['#1a2b3c']} />
             <ambientLight intensity={0.8} />
             <pointLight position={[50, 50, 100]} intensity={1} />
             <OrbitControls makeDefault />
