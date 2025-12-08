@@ -8,6 +8,7 @@ import { TrafficLights } from './components/TrafficLights';
 import { PathSamples } from './components/PathSamples';
 import { SdcPathHighlight } from './components/SdcPathHighlight';
 import { TrafficLightHighlight } from './components/TrafficLightHighlight';
+import { TrafficAudio } from './components/TrafficAudio';
 
 export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
   // Removed frame state to prevent full scene re-renders
@@ -181,6 +182,11 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
             {data && <Agents data={data} frameRef={frameRef} center={center} />} 
             {data && <TrafficLights key="traffic-lights-spheres" data={data} frameRef={frameRef} center={center} />}
             {data && <TrafficLightHighlight data={data} frameRef={frameRef} center={center} />}
+            {(() => {
+                const params = new URLSearchParams(window.location.search);
+                const audioEnabled = params.get('audio') !== 'false';
+                return audioEnabled && data && <TrafficAudio sdcSpeeds={sdcSpeeds} frameRef={frameRef} isPlaying={isPlaying} />;
+            })()}
             {(() => {
                  const params = new URLSearchParams(window.location.search);
                  const isAuto = params.get('autoCamera') !== 'false';
