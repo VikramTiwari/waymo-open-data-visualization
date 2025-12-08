@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useEffect } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
@@ -27,7 +27,7 @@ const BASE_MODES = [
     { name: 'Top Down (Static)', type: 'static_top', height: 40 },
 ];
 
-export function CameraRig({ data, frameRef, center, variant }) {
+export function CameraRig({ data, frameRef, center, variant, isAuto = true, onCameraChange }) {
     const { camera } = useThree();
     
     // 1. Analyze Scenario (SDC + Pedestrians)
@@ -123,8 +123,14 @@ export function CameraRig({ data, frameRef, center, variant }) {
         }
 
         return selected;
-
     }, [scenarioData, variant]);
+
+    // 3. Notify Parent of Camera Name change
+    useEffect(() => {
+        if (onCameraChange && activeMode) {
+             onCameraChange(activeMode.name);
+        }
+    }, [activeMode, onCameraChange]);
 
     // 3. Parse Trajectories
     const trajectories = useMemo(() => {
@@ -305,12 +311,11 @@ export function CameraRig({ data, frameRef, center, variant }) {
         }
         
         controls.target.lerp(targetPos, 0.5); 
-        if (camPos.distanceTo(targetPos) < 0.1) camPos.z += 1;
         
-        // For 'fixed_track', we want strict position, no interpolated lag?
-        // Actually smooth lookat is fine, but position is static.
-        // lerp is fine if target is static (it converts to static quick).
-        camera.position.lerp(camPos, 0.5); 
+        if (isAuto) {
+            if (camPos.distanceTo(targetPos) < 0.1) camPos.z += 1;
+            camera.position.lerp(camPos, 0.5);
+        }
         controls.update();
     });
 

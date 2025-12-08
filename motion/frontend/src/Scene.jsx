@@ -12,9 +12,12 @@ import { TrafficLightHighlight } from './components/TrafficLightHighlight';
 export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
   const [frame, setFrame] = useState(0);
   const [variant, setVariant] = useState(0);
+  const [cameraName, setCameraName] = useState('');
   
   // Total frames: 10 past + 1 current + 80 future = 91
   const TOTAL_FRAMES = 91;
+
+
 
   // Calculate generic center to keep everything near 0,0,0
   const center = useMemo(() => {
@@ -172,7 +175,11 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
             {data && <Agents data={data} frameRef={frameRef} center={center} />} 
             {data && <TrafficLights key="traffic-lights-spheres" data={data} frame={frame} center={center} />}
             {data && <TrafficLightHighlight data={data} frame={frame} center={center} />}
-            {data && <CameraRig data={data} frameRef={frameRef} center={center} variant={variant} />}
+            {(() => {
+                 const params = new URLSearchParams(window.location.search);
+                 const isAuto = params.get('autoCamera') !== 'false';
+                 return data && <CameraRig data={data} frameRef={frameRef} center={center} variant={variant} isAuto={isAuto} onCameraChange={setCameraName} />;
+            })()}
         </Canvas>
         
         {/* Minimal Info */}
@@ -181,6 +188,7 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
             <div>File: {fileInfo ? `${fileInfo.index}/${fileInfo.total} - ${fileInfo.name}` : 'Loading...'}</div>
             <div>Frame: {frame} / {TOTAL_FRAMES}</div>
             <div>Speed: {sdcSpeeds[frame] ? sdcSpeeds[frame].toFixed(2) : '0.00'} m/s</div>
+            <div>Cam: {cameraName}</div>
         </div>
     </div>
   );

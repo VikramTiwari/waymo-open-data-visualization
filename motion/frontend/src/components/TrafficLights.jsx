@@ -97,54 +97,102 @@ export function TrafficLights({ data, frame, center }) {
             });
         }
         
-        return parsedLights;
+        
+        // Dedup / Cluster Lights
+        // Waymo data might have multiple signal IDs for the same physical location (different lanes).
+        // This causes z-fighting if we render them all at once.
+        const uniqueLights = [];
+        const seenPos = []; // Simple distance check
+        
+        for (const light of parsedLights) {
+            // Get initial position (frame 0) or just first valid position?
+            // Light trajectory positions are usually static.
+            const p = light.trajectory[0]; 
+            if (!p) continue;
+            
+            let duplicate = false;
+            for (const sp of seenPos) {
+                const dx = sp.x - p.x;
+                const dy = sp.y - p.y;
+                const dz = sp.z - p.z;
+                const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+                if (dist < 0.2) { // 20cm threshold
+                    duplicate = true;
+                    break;
+                }
+            }
+            
+            if (!duplicate) {
+                uniqueLights.push(light);
+                seenPos.push({ x: p.x, y: p.y, z: p.z });
+            }
+        }
+        
+        return uniqueLights;
     }, [data, center]);
 
     return (
         <group>
-            {trafficLights.map((light, idx) => {
-                // Safe Frame Access with Clamping
-                const safeFrame = Math.min(frame, light.trajectory.length - 1);
-                
-                // Get Step
-                let step = light.trajectory[safeFrame];
-                if (!step) return null;
-                
-                // Fix Flickering: If state is 0 (Unknown), look back for last known valid state
-                let displayState = step.state;
-                if (displayState === 0) {
-                     // scan backwards
-                     for (let t = safeFrame - 1; t >= 0; t--) {
-                         if (light.trajectory[t].state !== 0) {
-                             displayState = light.trajectory[t].state;
-                             break;
-                         }
-                     }
-                }
-                
-                // If still 0, maybe look forward? Or just default to Gray.
-                
-                // Get Color
-                const color = getStateColor(displayState);
-                
-                // Basic visualization: A small sphere or box at the location
-                // Traffic lights are usually up high. Z might already reflect that.
-                
-                return (
-                    <group key={`${light.id}-${idx}`} position={[step.x, step.y, step.z]}>
-                         {/* Casing */}
-                        <mesh position={[0, 0, 0]}>
-                            <boxGeometry args={[0.5, 0.5, 1.2]} />
-                            <meshStandardMaterial color="#222" />
-                        </mesh>
-                        {/* Light */}
-                        <mesh position={[0, 0, 0]}>
-                            <sphereGeometry args={[0.3, 16, 16]} />
-                            <meshBasicMaterial color={color} toneMapped={false} />
-                        </mesh>
-                    </group>
-                );
-            })}
+            {trafficLights.map((light, idx) => (
+                <TrafficLightItem key={`${light.id}-${idx}`} light={light} frame={frame} />
+            ))}
+        </group>
+    );
+}
+
+function TrafficLightItem({ light, frame }) {
+    // Safe Frame Access
+    const safeFrame = Math.min(frame, light.trajectory.length - 1);
+    const step = light.trajectory[safeFrame];
+    
+    // Initial State determination (scan if needed, or just 0)
+    // We can't do heavy scan in useState initializer easily if it depends on props changing? 
+    // Actually we can just start with 0.
+    const [latchedState, setLatchedState] = React.useState(0);
+    
+    if (!step) return null;
+    
+    const currentState = step.state;
+    
+    // Derived State Logic: Update latchedState if we have a valid new state.
+    if (currentState !== 0 && currentState !== latchedState) {
+        setLatchedState(currentState);
+    }
+    
+    // Fallback: If latched is still 0 (start of sim and unknown), try to scan once?
+    // Or just use latchedState (which is 0 -> Gray).
+    // Let's improve the initial latch if 0.
+    let displayState = latchedState;
+    if (displayState === 0 && currentState !== 0) {
+        displayState = currentState; // Should be covered by setter above but for this render frame
+    }
+    if (displayState === 0) {
+        // Try to look back once if we really want to avoid gray at start
+         for (let t = safeFrame; t >= 0; t--) {
+             if (light.trajectory[t].state !== 0) {
+                 displayState = light.trajectory[t].state;
+                 // We don't setLatchedState here to avoid loop/side-effect complexity, 
+                 // but next frame might catch a valid one.
+                 // Actually, if we find one, we could just render it.
+                 break;
+             }
+         }
+    }
+
+    const color = getStateColor(displayState);
+    
+    return (
+        <group position={[step.x, step.y, step.z]}>
+             {/* Casing */}
+            <mesh>
+                <boxGeometry args={[0.5, 0.5, 1.2]} />
+                <meshStandardMaterial color="#222" />
+            </mesh>
+            {/* Light */}
+            <mesh>
+                <sphereGeometry args={[0.3, 16, 16]} />
+                <meshBasicMaterial color={color} toneMapped={false} />
+            </mesh>
         </group>
     );
 }

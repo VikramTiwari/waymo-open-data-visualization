@@ -114,65 +114,96 @@ export function TrafficLightHighlight({ data, frame, center }) {
         return lights;
     }, [data, center]);
 
+    // 3. Determine Display with Hysteresis
+    // State to latch visibility
+    // { visible: boolean, causeId: string, color: string }
+    const [bubbleState, setBubbleState] = React.useState({ visible: false, causeId: null, color: null });
+    
     if (!sdcState) return null;
 
-    // 3. Determine Display
     const currentFrameIdx = Math.floor(frame);
-    // Clamp frame index
-    const safeSdcFrame = Math.min(Math.max(0, currentFrameIdx), sdcState.length - 1);
     
-    const sdcPos = sdcState[safeSdcFrame];
+    const sdcPos = sdcState[Math.min(Math.max(0, currentFrameIdx), sdcState.length - 1)];
     const sdcV = sdcPos.speed || 0;
     
-    // Check if stopped
-    if (sdcV > 0.1) return null; // Moving
+    // If moving fast, bubble should definitely be hidden
+    if (sdcV > 0.1 && bubbleState.visible) {
+        setBubbleState({ visible: false, causeId: null, color: null });
+        return null;
+    }
+    if (sdcV > 0.1) return null;
 
-    // Find closest RED light
     // Red states: 1, 4, 7
     const RED_STATES = [1, 4, 7];
-    
-    let closestDist = Infinity;
-    let found = false;
+    const GREEN_STATES = [3, 6]; // If light turns green/go, we should hide immediately? (Logic: t10 green -> remove bubble)
 
-    // We assume light list is small enough to iterate
-    for (const light of lightStates) {
-        // Clamp and Stable State Lookup
-        const safeLightFrame = Math.min(Math.max(0, currentFrameIdx), light.states.length - 1);
-        let state = light.states[safeLightFrame];
+    if (bubbleState.visible) {
+        // Check ONLY the causing light
+        const causeLight = lightStates.find(l => l.id === bubbleState.causeId);
         
-        // Anti-flicker: if unknown (0), use previous
-        if (state === 0) {
-             for (let t = safeLightFrame - 1; t >= 0; t--) {
-                 if (light.states[t] !== 0) {
-                     state = light.states[t];
-                     break;
-                 }
-             }
+        let shouldHide = false;
+        
+        if (!causeLight) {
+            // Light disappeared? Hide.
+            shouldHide = true;
+        } else {
+            // Check state
+            const safeLightFrame = Math.min(Math.max(0, currentFrameIdx), causeLight.states.length - 1);
+            let state = causeLight.states[safeLightFrame];
+            
+            // If unknown, we assume it's still same as before (latch logic), so DON'T hide.
+            // If Green/Yellow -> Hide.
+            if (GREEN_STATES.includes(state)) {
+                shouldHide = true;
+            }
+            // If Red or Unknown -> Keep showing.
         }
         
-        if (RED_STATES.includes(state)) {
-            // Check distance
-            const dx = light.pos.x - sdcPos.x;
-            const dy = light.pos.y - sdcPos.y;
-            // Z ignored mostly?
-            const dist = Math.sqrt(dx*dx + dy*dy);
+        if (shouldHide) {
+             setBubbleState({ visible: false, causeId: null, color: null });
+             return null;
+        }
+        
+        // Render existing bubble
+        return (
+            <BubblePosition pos={sdcPos} color={bubbleState.color} />
+        );
+        
+    } else {
+        // Scan for Red lights
+        let closestDist = Infinity;
+        let foundLight = null;
+
+        for (const light of lightStates) {
+            const safeLightFrame = Math.min(Math.max(0, currentFrameIdx), light.states.length - 1);
+            const state = light.states[safeLightFrame];
             
-            if (dist < closestDist) {
-                closestDist = dist;
+            // Only trigger on DEFINITIVE Red. If unknown, ignore.
+            if (RED_STATES.includes(state)) {
+                const dx = light.pos.x - sdcPos.x;
+                const dy = light.pos.y - sdcPos.y;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                
+                if (dist < 40 && dist < closestDist) {
+                    closestDist = dist;
+                    foundLight = light;
+                }
             }
         }
-    }
-    
-    // Threshold: 30 meters? (Intersections can be large)
-    if (closestDist < 40) {
-        found = true;
+        
+        if (foundLight) {
+            setBubbleState({ visible: true, causeId: foundLight.id, color: '#ff0000' });
+            return <BubblePosition pos={sdcPos} color="#ff0000" />;
+        }
     }
 
-    if (!found) return null;
+    return null;
+}
 
+function BubblePosition({ pos, color }) {
     return (
         <Billboard
-            position={[sdcPos.x, sdcPos.y, sdcPos.z + 3.5]} // Above car
+            position={[pos.x, pos.y, pos.z + 3.5]}
             follow={true}
             lockX={false}
             lockY={false}
@@ -186,7 +217,7 @@ export function TrafficLightHighlight({ data, frame, center }) {
              <group scale={0.6}>
                  <mesh position={[0, 0.4, 0.01]}>
                     <circleGeometry args={[0.25, 16]} />
-                    <meshBasicMaterial color="#ff0000" />
+                    <meshBasicMaterial color={color} />
                  </mesh>
                  <mesh position={[0, 0, 0.01]}>
                     <circleGeometry args={[0.25, 16]} />
@@ -202,9 +233,6 @@ export function TrafficLightHighlight({ data, frame, center }) {
                     <meshBasicMaterial color="black" />
                  </mesh>
              </group>
-             
-             {/* Text? Check user image. "Traffic Light" + icon. */}
-             {/* User image shows just a bubble with icon. */}
         </Billboard>
     );
 }
