@@ -292,7 +292,7 @@ function AgentItem({ agent, frameRef }) {
                 {agent.isSdc ? (
                         <WaymoCar dims={agent.dims} isBraking={isBraking} />
                 ) : agent.type === 2 ? (
-                        <PedestrianAsset />
+                        <PedestrianAsset color="#FF9800" />
                 ) : agent.type === 4 ? (
                         <CyclistAsset />
                 ) : (

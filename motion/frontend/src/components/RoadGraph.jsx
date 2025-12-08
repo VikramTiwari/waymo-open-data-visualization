@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Line } from '@react-three/drei';
 import * as THREE from 'three';
+import { Crosswalks } from './Crosswalks';
 
 // Standard lane width in meters (approx 12ft)
 const LANE_WIDTH = 3.8;
@@ -88,9 +89,9 @@ const LaneRibbon = React.memo(({ points, width = LANE_WIDTH, color = '#555555', 
 
 
 function RoadGraphComponent({ data, center }) {
-    const { lanes, markings, stopSigns, speedBumps } = useMemo(() => {
+    const { lanes, markings, stopSigns, speedBumps, crosswalks } = useMemo(() => {
         const featureMap = data?.context?.featureMap;
-        if (!featureMap) return { lanes: [], markings: [], stopSigns: [], speedBumps: [] };
+        if (!featureMap) return { lanes: [], markings: [], stopSigns: [], speedBumps: [], crosswalks: [] };
         
         let map;
         if (Array.isArray(featureMap)) {
@@ -112,7 +113,7 @@ function RoadGraphComponent({ data, center }) {
         const ids = getVal('roadgraph_samples/id');
         const types = getVal('roadgraph_samples/type'); 
         
-        if (!xyz.length || !ids.length) return { lanes: [], markings: [], stopSigns: [], speedBumps: [] };
+        if (!xyz.length || !ids.length) return { lanes: [], markings: [], stopSigns: [], speedBumps: [], crosswalks: [] };
         
         const segments = {};
         const stopSignsList = [];
@@ -150,10 +151,11 @@ function RoadGraphComponent({ data, center }) {
             return { curve, points };
         }).filter(Boolean);
 
-        // Separate Lanes (Type 1, 2, 3) from Markings (Lines)
+        // Separate Lanes (Type 1, 2, 3), Crosswalks (Type 18), and Markings (Lines)
         const allSegments = Object.values(segments);
         const laneSegments = [];
         const markingSegments = [];
+        const crosswalkSegments = [];
 
         allSegments.forEach(seg => {
             // Type 1: Lane Center (Freeway)
@@ -161,6 +163,8 @@ function RoadGraphComponent({ data, center }) {
             // Type 3: Bike Lane
             if ([1, 2, 3].includes(seg.type)) {
                 laneSegments.push(seg);
+            } else if (seg.type === 18) { // Crosswalk
+                crosswalkSegments.push(seg);
             } else {
                 markingSegments.push(seg);
             }
@@ -170,7 +174,8 @@ function RoadGraphComponent({ data, center }) {
             lanes: laneSegments,
             markings: markingSegments,
             stopSigns: stopSignsList, 
-            speedBumps: speedBumpsList
+            speedBumps: speedBumpsList,
+            crosswalks: crosswalkSegments
         };
 
     }, [data, center]);
@@ -208,6 +213,9 @@ function RoadGraphComponent({ data, center }) {
                     />
                 );
             })}
+
+            {/* Crosswalks (Custom Zebra Shader) */}
+            <Crosswalks crosswalks={crosswalks} />
 
             {/* Distinct Stop Signs (Flat Octagons) */}
             {stopSigns.map((sign, idx) => (
@@ -264,8 +272,10 @@ function getMarkingStyle(type) {
         case 16: // Road Edge Median
              return { color: '#000000', width: 4, opacity: 1, dash: false };
         
-        case 18: // Crosswalk (Zebra Pattern style but flatter)
-             return { color: '#ffffff', width: 3, opacity: 0.8, dash: true, dashSize: 0.7, gapSize: 0.7 };
+        // Type 18 (Crosswalk) is now handled by dedicated component, 
+        // but if any slip through or for fallback:
+        // case 18:
+        //      return { color: '#ffffff', width: 3, opacity: 0.8, dash: true, dashSize: 0.7, gapSize: 0.7 };
              
         default: 
              return { color: '#000000', width: 1, opacity: 0.3, dash: false };
