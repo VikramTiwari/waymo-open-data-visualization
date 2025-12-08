@@ -1,7 +1,8 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
+import { useFrame } from '@react-three/fiber';
 
-export function TrafficLights({ data, frame, center }) {
+export function TrafficLights({ data, frameRef, center }) {
     const trafficLights = useMemo(() => {
         const featureMap = data?.context?.featureMap;
         if (!featureMap) return [];
@@ -134,55 +135,46 @@ export function TrafficLights({ data, frame, center }) {
     return (
         <group>
             {trafficLights.map((light, idx) => (
-                <TrafficLightItem key={`${light.id}-${idx}`} light={light} frame={frame} />
+                <TrafficLightItem key={`${light.id}-${idx}`} light={light} frameRef={frameRef} />
             ))}
         </group>
     );
 }
 
-function TrafficLightItem({ light, frame }) {
-    // Safe Frame Access
-    const safeFrame = Math.min(frame, light.trajectory.length - 1);
-    const step = light.trajectory[safeFrame];
-    
-    // Initial State determination (scan if needed, or just 0)
-    // We can't do heavy scan in useState initializer easily if it depends on props changing? 
-    // Actually we can just start with 0.
-    const [latchedState, setLatchedState] = React.useState(0);
-    
-    if (!step) return null;
-    
-    const currentState = step.state;
-    
-    // Derived State Logic: Update latchedState if we have a valid new state.
-    if (currentState !== 0 && currentState !== latchedState) {
-        setLatchedState(currentState);
-    }
-    
-    // Fallback: If latched is still 0 (start of sim and unknown), try to scan once?
-    // Or just use latchedState (which is 0 -> Gray).
-    // Let's improve the initial latch if 0.
-    let displayState = latchedState;
-    if (displayState === 0 && currentState !== 0) {
-        displayState = currentState; // Should be covered by setter above but for this render frame
-    }
-    if (displayState === 0) {
-        // Try to look back once if we really want to avoid gray at start
-         for (let t = safeFrame; t >= 0; t--) {
-             if (light.trajectory[t].state !== 0) {
-                 displayState = light.trajectory[t].state;
-                 // We don't setLatchedState here to avoid loop/side-effect complexity, 
-                 // but next frame might catch a valid one.
-                 // Actually, if we find one, we could just render it.
-                 break;
-             }
-         }
-    }
+function TrafficLightItem({ light, frameRef }) {
+    const meshRef = useRef();
+    const lastStateRef = useRef(-1);
 
-    const color = getStateColor(displayState);
-    
+    useFrame(() => {
+        if (!frameRef || !meshRef.current) return;
+        
+        const frame = frameRef.current;
+        const safeFrame = Math.min(Math.floor(frame), light.trajectory.length - 1);
+        const step = light.trajectory[safeFrame];
+
+        if (!step) return;
+
+        // Position update (usually static, but good to be safe)
+        // meshRef.current.position.set(step.x, step.y, step.z); // Parent group handles position? Wait, parent map passes loop key, but item renders group.
+        // Ah, looking at previous code, Item returned a group with position.
+        // We should update the ref to the group.
+        
+        const currentState = step.state;
+        
+        if (currentState !== lastStateRef.current) {
+             const color = getStateColor(currentState);
+             // Ref is attached to meshBasicMaterial, so current IS the material
+             if (meshRef.current) meshRef.current.color.set(color);
+             lastStateRef.current = currentState;
+        }
+    });
+
+    // Initial position from first frame (static)
+    const initialStep = light.trajectory[0];
+    if (!initialStep) return null;
+
     return (
-        <group position={[step.x, step.y, step.z]}>
+        <group position={[initialStep.x, initialStep.y, initialStep.z]}>
              {/* Casing */}
             <mesh>
                 <boxGeometry args={[0.5, 0.5, 1.2]} />
@@ -191,7 +183,8 @@ function TrafficLightItem({ light, frame }) {
             {/* Light */}
             <mesh>
                 <sphereGeometry args={[0.3, 16, 16]} />
-                <meshBasicMaterial color={color} toneMapped={false} />
+                {/* We use a ref for the material to update color imperatively */}
+                <meshBasicMaterial ref={meshRef} color="#808080" toneMapped={false} />
             </mesh>
         </group>
     );

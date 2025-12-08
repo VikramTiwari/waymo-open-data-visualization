@@ -1,8 +1,9 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { Billboard, Text } from '@react-three/drei';
 import * as THREE from 'three';
+import { useFrame } from '@react-three/fiber';
 
-export function TrafficLightHighlight({ data, frame, center }) {
+export function TrafficLightHighlight({ data, frameRef, center }) {
     // 1. Get SDC Trajectory (Position + Speed)
     const sdcState = useMemo(() => {
         const featureMap = data?.context?.featureMap;
@@ -117,87 +118,90 @@ export function TrafficLightHighlight({ data, frame, center }) {
     // 3. Determine Display with Hysteresis
     // State to latch visibility
     // { visible: boolean, causeId: string, color: string }
-    const [bubbleState, setBubbleState] = React.useState({ visible: false, causeId: null, color: null });
+    const [bubbleState, setBubbleState] = React.useState({ visible: false, causeId: null, color: null, pos: null });
     
-    if (!sdcState) return null;
-
-    const currentFrameIdx = Math.floor(frame);
+    // We use a ref to prevent stale closures in useFrame if we were using state directly, 
+    // but here we just need to read data and set state if diff.
     
-    const sdcPos = sdcState[Math.min(Math.max(0, currentFrameIdx), sdcState.length - 1)];
-    const sdcV = sdcPos.speed || 0;
-    
-    // If moving fast, bubble should definitely be hidden
-    if (sdcV > 0.1 && bubbleState.visible) {
-        setBubbleState({ visible: false, causeId: null, color: null });
-        return null;
-    }
-    if (sdcV > 0.1) return null;
+    useFrame(() => {
+        if (!frameRef || !sdcState) return;
 
-    // Red states: 1, 4, 7
-    const RED_STATES = [1, 4, 7];
-    const GREEN_STATES = [3, 6]; // If light turns green/go, we should hide immediately? (Logic: t10 green -> remove bubble)
+        const currentFrameIdx = Math.floor(frameRef.current);
+        const sdcPos = sdcState[Math.min(Math.max(0, currentFrameIdx), sdcState.length - 1)];
+        const sdcV = sdcPos.speed || 0;
 
-    if (bubbleState.visible) {
-        // Check ONLY the causing light
-        const causeLight = lightStates.find(l => l.id === bubbleState.causeId);
-        
-        let shouldHide = false;
-        
-        if (!causeLight) {
-            // Light disappeared? Hide.
-            shouldHide = true;
-        } else {
-            // Check state
-            const safeLightFrame = Math.min(Math.max(0, currentFrameIdx), causeLight.states.length - 1);
-            let state = causeLight.states[safeLightFrame];
-            
-            // If unknown, we assume it's still same as before (latch logic), so DON'T hide.
-            // If Green/Yellow -> Hide.
-            if (GREEN_STATES.includes(state)) {
-                shouldHide = true;
+        // If moving fast, bubble should definitely be hidden
+        if (sdcV > 0.1) {
+            if (bubbleState.visible) {
+                setBubbleState({ visible: false, causeId: null, color: null, pos: null });
             }
-            // If Red or Unknown -> Keep showing.
+            return;
         }
-        
-        if (shouldHide) {
-             setBubbleState({ visible: false, causeId: null, color: null });
-             return null;
-        }
-        
-        // Render existing bubble
-        return (
-            <BubblePosition pos={sdcPos} color={bubbleState.color} />
-        );
-        
-    } else {
-        // Scan for Red lights
-        let closestDist = Infinity;
-        let foundLight = null;
 
-        for (const light of lightStates) {
-            const safeLightFrame = Math.min(Math.max(0, currentFrameIdx), light.states.length - 1);
-            const state = light.states[safeLightFrame];
+        // Red states: 1, 4, 7
+        const RED_STATES = [1, 4, 7];
+        const GREEN_STATES = [3, 6]; 
+
+        if (bubbleState.visible) {
+            // Check ONLY the causing light
+            const causeLight = lightStates.find(l => l.id === bubbleState.causeId);
             
-            // Only trigger on DEFINITIVE Red. If unknown, ignore.
-            if (RED_STATES.includes(state)) {
-                const dx = light.pos.x - sdcPos.x;
-                const dy = light.pos.y - sdcPos.y;
-                const dist = Math.sqrt(dx*dx + dy*dy);
+            let shouldHide = false;
+            
+            if (!causeLight) {
+                shouldHide = true;
+            } else {
+                const safeLightFrame = Math.min(Math.max(0, currentFrameIdx), causeLight.states.length - 1);
+                let state = causeLight.states[safeLightFrame];
                 
-                if (dist < 40 && dist < closestDist) {
-                    closestDist = dist;
-                    foundLight = light;
+                if (GREEN_STATES.includes(state)) {
+                    shouldHide = true;
                 }
             }
-        }
-        
-        if (foundLight) {
-            setBubbleState({ visible: true, causeId: foundLight.id, color: '#ff0000' });
-            return <BubblePosition pos={sdcPos} color="#ff0000" />;
-        }
-    }
+            
+            if (shouldHide) {
+                 setBubbleState({ visible: false, causeId: null, color: null, pos: null });
+            } else {
+                // Update position if SDC moved (it shouldn't much if stopped, but drifting might occur)
+                // Just to be safe, update position slightly?
+                // Actually if sdcV < 0.1 it's mostly static.
+                // But let's check if we need to update 'pos' in state for re-render?
+                // Or just assume it's fine.
+            }
+            
+        } else {
+            // Scan for Red lights
+            let closestDist = Infinity;
+            let foundLight = null;
 
-    return null;
+            for (const light of lightStates) {
+                const safeLightFrame = Math.min(Math.max(0, currentFrameIdx), light.states.length - 1);
+                const state = light.states[safeLightFrame];
+                
+                // Only trigger on DEFINITIVE Red.
+                if (RED_STATES.includes(state)) {
+                    const dx = light.pos.x - sdcPos.x;
+                    const dy = light.pos.y - sdcPos.y;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    
+                    if (dist < 40 && dist < closestDist) {
+                        closestDist = dist;
+                        foundLight = light;
+                    }
+                }
+            }
+            
+            if (foundLight) {
+                setBubbleState({ visible: true, causeId: foundLight.id, color: '#ff0000', pos: sdcPos });
+            }
+        }
+    });
+
+    if (!bubbleState.visible || !bubbleState.pos) return null;
+
+    return (
+        <BubblePosition pos={bubbleState.pos} color={bubbleState.color} />
+    );
 }
 
 function BubblePosition({ pos, color }) {

@@ -10,14 +10,16 @@ import { SdcPathHighlight } from './components/SdcPathHighlight';
 import { TrafficLightHighlight } from './components/TrafficLightHighlight';
 
 export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
-  const [frame, setFrame] = useState(0);
+  // Removed frame state to prevent full scene re-renders
   const [variant, setVariant] = useState(0);
   const [cameraName, setCameraName] = useState('');
   
   // Total frames: 10 past + 1 current + 80 future = 91
   const TOTAL_FRAMES = 91;
 
-
+  // Refs for UI updates
+  const frameUiRef = useRef();
+  const speedUiRef = useRef();
 
   // Calculate generic center to keep everything near 0,0,0
   const center = useMemo(() => {
@@ -138,14 +140,15 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
              frameRef.current = TOTAL_FRAMES - 1; 
           }
 
-          // Sync UI state every frame (or throttle if needed, but simple is fine for now)
-          // Flooring to avoid excessive updates if we checked strict equality?
-          // Actually, setting state 60fps is heavy. Let's set it only if integer changes.
-          const currentInt = Math.floor(frameRef.current);
-          setFrame(prev => {
-              if (prev !== currentInt) return currentInt;
-              return prev;
-          });
+          // Imperative UI Updates
+          const currentFrame = Math.floor(frameRef.current);
+          if (frameUiRef.current) {
+               frameUiRef.current.innerText = `Frame: ${currentFrame} / ${TOTAL_FRAMES}`;
+          }
+          if (speedUiRef.current) {
+              const spd = sdcSpeeds[currentFrame] !== undefined ? sdcSpeeds[currentFrame] : 0;
+              speedUiRef.current.innerText = `Speed: ${spd.toFixed(2)} m/s`;
+          }
       });
       return null;
   };
@@ -154,11 +157,14 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
   useEffect(() => {
      if (data) {
         frameRef.current = 0;
-        setFrame(0);
+        // Also reset UI
+        if (frameUiRef.current) frameUiRef.current.innerText = `Frame: 0 / ${TOTAL_FRAMES}`;
+        if (speedUiRef.current && sdcSpeeds[0]) speedUiRef.current.innerText = `Speed: ${sdcSpeeds[0].toFixed(2)} m/s`;
+        
         setVariant(Math.floor(Math.random() * 100));
         setIsPlaying(true);
      }
-  }, [data]);
+  }, [data, sdcSpeeds]);
 
   return (
     <div style={{ width: '100%', height: '100vh', position: 'relative', background: 'black' }}>
@@ -170,11 +176,11 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
             <AnimationLoop />
             
             {data && <RoadGraph data={data} center={center} />}
-            {data && <SdcPathHighlight data={data} center={center} frame={frame} />}
+            {data && <SdcPathHighlight data={data} center={center} frameRef={frameRef} />}
             {data && <PathSamples data={data} center={center} />}
             {data && <Agents data={data} frameRef={frameRef} center={center} />} 
-            {data && <TrafficLights key="traffic-lights-spheres" data={data} frame={frame} center={center} />}
-            {data && <TrafficLightHighlight data={data} frame={frame} center={center} />}
+            {data && <TrafficLights key="traffic-lights-spheres" data={data} frameRef={frameRef} center={center} />}
+            {data && <TrafficLightHighlight data={data} frameRef={frameRef} center={center} />}
             {(() => {
                  const params = new URLSearchParams(window.location.search);
                  const isAuto = params.get('autoCamera') !== 'false';
@@ -186,8 +192,8 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
         <div style={{ position: 'absolute', bottom: 20, left: 20, color: 'white', fontFamily: 'monospace', opacity: 0.7 }}>
             <div>Scn: {scenarioInfo ? `${scenarioInfo.index}/${scenarioInfo.total} - ` : ''}{scenarioId || 'Loading...'}</div>
             <div>File: {fileInfo ? `${fileInfo.index}/${fileInfo.total} - ${fileInfo.name}` : 'Loading...'}</div>
-            <div>Frame: {frame} / {TOTAL_FRAMES}</div>
-            <div>Speed: {sdcSpeeds[frame] ? sdcSpeeds[frame].toFixed(2) : '0.00'} m/s</div>
+            <div ref={frameUiRef}>Frame: 0 / {TOTAL_FRAMES}</div>
+            <div ref={speedUiRef}>Speed: 0.00 m/s</div>
             <div>Cam: {cameraName}</div>
         </div>
     </div>

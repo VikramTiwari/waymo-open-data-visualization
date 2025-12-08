@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { Line } from '@react-three/drei';
 import * as THREE from 'three';
 
-export function RoadGraph({ data, center }) {
+function RoadGraphComponent({ data, center }) {
     const { lines, stopSigns, speedBumps, speedBumpTexture } = useMemo(() => {
         const featureMap = data?.context?.featureMap;
         if (!featureMap) return { lines: [], stopSigns: [], speedBumps: [] };
@@ -26,7 +26,7 @@ export function RoadGraph({ data, center }) {
         const xyz = getVal('roadgraph_samples/xyz');
         const ids = getVal('roadgraph_samples/id');
         const types = getVal('roadgraph_samples/type'); 
-
+        
         if (!xyz.length || !ids.length) return { lines: [], stopSigns: [], speedBumps: [] };
         
         const segments = {};
@@ -65,39 +65,10 @@ export function RoadGraph({ data, center }) {
             return { curve, points };
         }).filter(Boolean);
 
-        // Create Speed Bump Texture
-        const canvas = document.createElement('canvas');
-        canvas.width = 64;
-        canvas.height = 64;
-        const ctx = canvas.getContext('2d');
-        
-        // Yellow background
-        ctx.fillStyle = '#F1C40F';
-        ctx.fillRect(0, 0, 64, 64);
-        
-        // Black stripes
-        ctx.fillStyle = '#000000';
-        ctx.beginPath();
-        // Draw diagonal stripes
-        for (let i = -64; i < 128; i += 16) {
-            ctx.moveTo(i, 0);
-            ctx.lineTo(i + 16, 64);
-            ctx.lineTo(i + 8, 64);
-            ctx.lineTo(i - 8, 0);
-        }
-        ctx.fill();
-        
-        const texture = new THREE.CanvasTexture(canvas);
-        texture.wrapS = THREE.RepeatWrapping;
-        texture.wrapT = THREE.RepeatWrapping;
-        // Adjust repeat based on length if possible, or just a fixed repeat
-        texture.repeat.set(1, 1); 
-
         return { 
             lines: Object.values(segments), 
             stopSigns: stopSignsList, 
-            speedBumps: speedBumpsList,
-            speedBumpTexture: texture
+            speedBumps: speedBumpsList
         };
 
     }, [data, center]);
@@ -154,6 +125,8 @@ export function RoadGraph({ data, center }) {
         </group>
     );
 }
+
+export const RoadGraph = React.memo(RoadGraphComponent);
 
 function getRoadStyle(type) {
     // Waymo road types

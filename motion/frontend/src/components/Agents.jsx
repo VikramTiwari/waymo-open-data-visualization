@@ -64,6 +64,26 @@ export function Agents({ data, frameRef, center }) {
         const isSdcList = getVal('state/is_sdc');
         
         const [cx, cy, cz] = center;
+        // --- RoadGraph for Parked Car Detection ---
+        const mapX = getVal('roadgraph_samples/xyz'); // Packed XYZ
+        const mapType = getVal('roadgraph_samples/type');
+        
+        const lanePoints = [];
+        if (mapX && mapType) {
+            for(let i=0; i<mapType.length; i++) {
+                // Type 1: Lane Center, Type 2: Lane Center (other)
+                if (mapType[i] === 1 || mapType[i] === 2) {
+                    lanePoints.push({
+                        x: mapX[i*3] - cx,
+                        y: mapX[i*3+1] - cy,
+                        z: mapX[i*3+2] - cz
+                    });
+                }
+            }
+        }
+        // ------------------------------------------
+        
+
 
         const parsedAgents = [];
         for (let i = 0; i < count; i++) {
@@ -112,7 +132,38 @@ export function Agents({ data, frameRef, center }) {
                 step.accel = accel;
             }
             // Last point accel
-            if (trajectory.length > 0) trajectory[trajectory.length - 1].accel = 0;
+            // Check if Static (Max speed < 0.5 m/s)
+            let maxSpeed = 0;
+            for(const step of trajectory) {
+                const s = Math.sqrt(step.vx*step.vx + step.vy*step.vy);
+                if (s > maxSpeed) maxSpeed = s;
+            }
+            // Refined Parked Logic: Static AND Far from Lane Center
+            let isParked = false;
+            if (maxSpeed < 0.5) {
+                // Check distance to nearest lane point
+                // Using start position
+                const startPos = trajectory[0];
+                let minDist = Infinity;
+                
+                // Sample optimization: check every 5th lane point? Lane points are dense.
+                // Or just brute force, standard scene has ~20-30k points? might be slow.
+                // Lane centers are sparse? usually dense polyline.
+                // Let's increment by 5 to save perf.
+                for (let k = 0; k < lanePoints.length; k += 5) {
+                    const lp = lanePoints[k];
+                    const dx = lp.x - startPos.x;
+                    const dy = lp.y - startPos.y;
+                    const d = dx*dx + dy*dy; // Squared
+                    if (d < minDist) minDist = d;
+                    if (d < 4.0) break; // If < 2m (4m squared), definitely on road.
+                }
+                
+                // Threshold: 2 meters?
+                if (minDist > 4.0) { // > 2m distance
+                    isParked = true;
+                }
+            }
 
             const isSdc = isSdcList && isSdcList[i] == 1;
 
@@ -120,6 +171,7 @@ export function Agents({ data, frameRef, center }) {
                 id: ids[i],
                 type: type[i],
                 isSdc: isSdc,
+                isParked: isParked, 
                 dims: [length[i], width[i], height[i] || 1.5], // L, W, H
                 trajectory
             });
@@ -246,7 +298,7 @@ function AgentItem({ agent, frameRef }) {
                 ) : (
                     <mesh> 
                         <boxGeometry args={[agent.dims[0], agent.dims[1], agent.dims[2]]} />
-                        <meshStandardMaterial color={getTypeColor(agent.type)} />
+                        <meshStandardMaterial color={agent.isParked && agent.type === 1 ? "#abcbfd" : getTypeColor(agent.type)} />
                     </mesh>
                 )}
              </group>

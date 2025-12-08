@@ -1,7 +1,8 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
+import { useFrame } from '@react-three/fiber';
 
-export function SdcPathHighlight({ data, center, frame }) {
+export function SdcPathHighlight({ data, center, frameRef }) {
     const { pathGeometry, totalSamples } = useMemo(() => {
         const featureMap = data?.context?.featureMap;
         if (!featureMap) return { pathGeometry: null, totalSamples: 0 };
@@ -142,14 +143,15 @@ export function SdcPathHighlight({ data, center, frame }) {
 
     // Update Draw Range based on Frame
     // Use a ref to mesh to update geometry drawRange without excessive re-renders
-    const meshRef = React.useRef();
+    const meshRef = useRef();
 
-    React.useEffect(() => {
-        if (!meshRef.current || !pathGeometry) return;
+    useFrame(() => {
+        if (!meshRef.current || !pathGeometry || !frameRef) return;
         
         // We have Total Frames approx 91 relative to data structure (10 past + 1 curr + 80 future)
         // 'frame' prop comes from Scene, 0..90.
         
+        const frame = frameRef.current;
         const TOTAL_DATA_FRAMES = 91; 
         const progress = Math.min(Math.max(frame / TOTAL_DATA_FRAMES, 0), 0.99); // Cap slightly
         
@@ -163,8 +165,7 @@ export function SdcPathHighlight({ data, center, frame }) {
         const count = totalIndices - startIndex;
         
         meshRef.current.geometry.setDrawRange(startIndex, count);
-        
-    }, [frame, pathGeometry, totalSamples]);
+    });
 
     if (!pathGeometry) return null;
 
