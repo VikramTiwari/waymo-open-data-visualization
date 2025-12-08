@@ -118,6 +118,380 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
     return speeds;
   }, [parsedMap]);
 
+  // Centralized Agent Parsing
+  const parsedAgents = useMemo(() => {
+    if (!parsedMap) return [];
+    
+    // Helper to get values safely
+    const getVal = (key) => { 
+        const feat = parsedMap.get(key);
+        if (!feat) return [];
+        return feat.floatList?.valueList || feat.int64List?.valueList || [];
+    };
+    
+    const ids = getVal('state/id');
+    const count = ids.length;
+    if (count === 0) return [];
+    
+    const pastX = getVal('state/past/x');
+    const pastY = getVal('state/past/y');
+    const pastZ = getVal('state/past/z');
+    const pastYaw = getVal('state/past/bbox_yaw');
+    const pastVx = getVal('state/past/velocity_x');
+    const pastVy = getVal('state/past/velocity_y');
+    const pastLen = pastX.length / count;
+
+    const currX = getVal('state/current/x');
+    const currY = getVal('state/current/y');
+    const currZ = getVal('state/current/z');
+    const currYaw = getVal('state/current/bbox_yaw');
+    const currVx = getVal('state/current/velocity_x');
+    const currVy = getVal('state/current/velocity_y');
+    
+    const futureX = getVal('state/future/x');
+    const futureY = getVal('state/future/y');
+    const futureZ = getVal('state/future/z');
+    const futureYaw = getVal('state/future/bbox_yaw');
+    const futureVx = getVal('state/future/velocity_x');
+    const futureVy = getVal('state/future/velocity_y');
+    const futureLen = futureX.length / count;
+    
+    const width = getVal('state/current/width');
+    const length = getVal('state/current/length');
+    const height = getVal('state/current/height');
+    const type = getVal('state/type');
+    const isSdcList = getVal('state/is_sdc');
+    
+    const [cx, cy, cz] = center;
+    
+    // RoadGraph for Parked Detection
+    const mapX = getVal('roadgraph_samples/xyz');
+    const mapType = getVal('roadgraph_samples/type');
+    const lanePoints = [];
+    if (mapX && mapType) {
+        for(let i=0; i<mapType.length; i++) {
+            if (mapType[i] === 1 || mapType[i] === 2) {
+                lanePoints.push({
+                    x: mapX[i*3] - cx,
+                    y: mapX[i*3+1] - cy,
+                    z: mapX[i*3+2] - cz
+                });
+            }
+        }
+    }
+
+    const agents = [];
+    for (let i = 0; i < count; i++) {
+        const trajectory = [];
+        
+        const pushStep = (rawX, rawY, rawZ, rawYaw, rawVx, rawVy) => {
+             trajectory.push({
+                x: rawX - cx,
+                y: rawY - cy,
+                z: rawZ - cz,
+                yaw: rawYaw || 0,
+                vx: rawVx || 0,
+                vy: rawVy || 0
+            });
+        };
+
+        for (let t = 0; t < pastLen; t++) {
+            const idx = i * pastLen + t;
+            pushStep(pastX[idx], pastY[idx], pastZ[idx], pastYaw[idx], pastVx[idx], pastVy[idx]);
+        }
+        
+        pushStep(currX[i], currY[i], currZ[i], currYaw[i], currVx[i], currVy[i]);
+        
+        for (let t = 0; t < futureLen; t++) {
+            const idx = i * futureLen + t;
+            pushStep(futureX[idx], futureY[idx], futureZ[idx], futureYaw[idx], futureVx[idx], futureVy[idx]);
+        }
+        
+        // Accel calc
+        for (let t = 0; t < trajectory.length - 1; t++) {
+            const step = trajectory[t];
+            const next = trajectory[t + 1];
+            const speedCurr = Math.sqrt(step.vx*step.vx + step.vy*step.vy);
+            const speedNext = Math.sqrt(next.vx*next.vx + next.vy*next.vy);
+            const accel = (speedNext - speedCurr) / 0.1;
+            step.accel = accel;
+        }
+        
+        let maxSpeed = 0;
+        for(const step of trajectory) {
+            const s = Math.sqrt(step.vx*step.vx + step.vy*step.vy);
+            if (s > maxSpeed) maxSpeed = s;
+        }
+        
+        let isParked = false;
+        if (type[i] === 1 && maxSpeed < 0.5) {
+            const startPos = trajectory[0];
+            let minDist = Infinity;
+            if (lanePoints.length > 0) {
+                 for (let k = 0; k < lanePoints.length; k += 5) {
+                    const lp = lanePoints[k];
+                    const dx = lp.x - startPos.x;
+                    const dy = lp.y - startPos.y;
+                    const d = dx*dx + dy*dy;
+                    if (d < minDist) minDist = d;
+                    if (d < 4.0) break; 
+                }
+                if (minDist > 4.0) isParked = true;
+            }
+        }
+
+        const isSdc = isSdcList && isSdcList[i] == 1;
+
+        agents.push({
+            id: ids[i],
+            type: type[i],
+            isSdc: isSdc,
+            isParked: isParked, 
+            dims: [length[i], width[i], height[i] || 1.5], 
+            trajectory
+        });
+    }
+    return agents;
+
+  }, [parsedMap, center]);
+
+  // Centralized Traffic Lights Parsing
+  const parsedTrafficLights = useMemo(() => {
+    if (!parsedMap) return [];
+    
+    const getVal = (key) => { 
+        const feat = parsedMap.get(key);
+        if (!feat) return [];
+        return feat.floatList?.valueList || feat.int64List?.valueList || [];
+    };
+
+    const ids = getVal('traffic_light_state/current/id');
+    const count = ids.length;
+    if (count === 0) return [];
+
+    const currentStates = getVal('traffic_light_state/current/state');
+    const currentX = getVal('traffic_light_state/current/x');
+    const currentY = getVal('traffic_light_state/current/y');
+    const currentZ = getVal('traffic_light_state/current/z');
+    const currentValid = getVal('traffic_light_state/current/valid');
+    
+    const pastStates = getVal('traffic_light_state/past/state');
+    const pastValid = getVal('traffic_light_state/past/valid');
+    
+    const futureStates = getVal('traffic_light_state/future/state');
+    const futureValid = getVal('traffic_light_state/future/valid');
+    
+    const pastLen = pastStates.length > 0 ? (pastStates.length / count) : 0;
+    const futureLen = futureStates.length > 0 ? (futureStates.length / count) : 0;
+    
+    const [cx, cy, cz] = center;
+
+    const parsedLights = [];
+    
+    for (let i = 0; i < count; i++) {
+        if (currentValid && currentValid[i] === 0) continue;
+
+        const trajectory = [];
+        
+        // Past
+        for (let t = 0; t < pastLen; t++) {
+            const idx = i * pastLen + t;
+             if (pastValid && pastValid[idx] === 0) {
+                 trajectory.push(null);
+                 continue;
+             }
+            trajectory.push({
+                state: pastStates[idx],
+            });
+        }
+        
+        // Current
+        trajectory.push({
+            state: currentStates[i]
+        });
+        
+        // Future
+        for (let t = 0; t < futureLen; t++) {
+            const idx = i * futureLen + t;
+            if (futureValid && futureValid[idx] === 0) {
+                 trajectory.push(null);
+                 continue;
+             }
+            trajectory.push({
+                state: futureStates[idx]
+            });
+        }
+        
+        // Position
+        const x = (currentX[i] || 0) - cx;
+        const y = (currentY[i] || 0) - cy;
+        const z = (currentZ[i] || 0) - cz;
+
+        parsedLights.push({
+            id: ids[i],
+            x, y, z,
+            trajectory
+        });
+    }
+    
+    // Dedup / Cluster
+    const uniqueLights = [];
+    const seenPos = [];
+    
+    for (const light of parsedLights) {
+        let duplicate = false;
+        for (const sp of seenPos) {
+            const dx = sp.x - light.x;
+            const dy = sp.y - light.y;
+            const dz = sp.z - light.z;
+            const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+            if (dist < 0.2) { 
+                duplicate = true;
+                break;
+            }
+        }
+        
+        if (!duplicate) {
+            uniqueLights.push(light);
+            seenPos.push({ x: light.x, y: light.y, z: light.z });
+        }
+    }
+    
+    return uniqueLights;
+  }, [parsedMap, center]);
+
+  // Centralized PathSamples Parsing
+  const parsedPathSamples = useMemo(() => {
+    if (!parsedMap) return null;
+    
+    const getVal = (key) => {
+        const feat = parsedMap.get(key);
+        if (!feat) return [];
+        return feat.floatList?.valueList || feat.int64List?.valueList || [];
+    };
+
+    const rawXyz = getVal('path_samples/xyz');
+    const ids = getVal('path_samples/id');
+
+    if (!rawXyz.length || !ids.length) return null;
+    
+    const [cx, cy, cz] = center;
+    
+    const vertices = [];
+    
+    let prevId = null;
+    let px = 0, py = 0, pz = 0;
+
+    for (let i = 0; i < ids.length; i++) {
+        const id = ids[i];
+        const x = rawXyz[i*3] - cx;
+        const y = rawXyz[i*3+1] - cy;
+        const z = rawXyz[i*3+2] - cz;
+        
+        if (id === prevId) {
+            vertices.push(px, py, pz);
+            vertices.push(x, y, z);
+        }
+        
+        prevId = id;
+        px = x; py = y; pz = z;
+    }
+    
+    if (vertices.length === 0) return null;
+    
+    // We return Raw Vertices (Float32Array-able) instead of Geometry to keep Scene "pure-ish"
+    // Actually, creating Float32Array here is cheap.
+    return new Float32Array(vertices);
+
+  }, [parsedMap, center]);
+
+  // Centralized SDC State
+  const parsedSdcState = useMemo(() => {
+    if (!parsedMap) return null;
+
+    const getVal = (key) => {
+        const feat = parsedMap.get(key);
+        return feat?.floatList?.valueList || feat?.int64List?.valueList || [];
+    };
+
+    const sdcList = getVal('state/is_sdc');
+    let sdcIndex = -1;
+    // Check for 1 (int64 might be string or number)
+    // Using loose equality or finding index
+    for(let i=0; i<sdcList.length; i++) {
+        if(sdcList[i] == 1) {
+            sdcIndex = i;
+            break;
+        }
+    }
+    
+    if (sdcIndex === -1) return null;
+
+    const count = sdcList.length;
+
+    const pastX = getVal('state/past/x');
+    const pastY = getVal('state/past/y');
+    const pastZ = getVal('state/past/z');
+    const pastSpeed = getVal('state/past/speed'); // For Highlight
+    
+    const currX = getVal('state/current/x');
+    const currY = getVal('state/current/y');
+    const currZ = getVal('state/current/z');
+    const currSpeed = getVal('state/current/speed');
+    const heightList = getVal('state/current/height');
+    
+    const futureX = getVal('state/future/x');
+    const futureY = getVal('state/future/y');
+    const futureZ = getVal('state/future/z');
+    const futureSpeed = getVal('state/future/speed');
+    
+    const sdcHeight = heightList[sdcIndex] || 1.6;
+    
+    const pastLen = pastX.length / count;
+    const futureLen = futureX.length / count;
+    
+    const [cx, cy, cz] = center;
+    const trajectory = [];
+
+    // Past
+    for (let t = 0; t < pastLen; t++) {
+         const idx = sdcIndex * pastLen + t;
+         trajectory.push({
+            x: pastX[idx] - cx,
+            y: pastY[idx] - cy,
+            z: pastZ[idx] - cz,
+            zBox: pastZ[idx] - cz - (sdcHeight / 2),
+            speed: pastSpeed[idx] || 0
+         });
+    }
+
+    // Current
+    if (currX[sdcIndex] !== undefined) {
+         trajectory.push({
+            x: currX[sdcIndex] - cx,
+            y: currY[sdcIndex] - cy,
+            z: currZ[sdcIndex] - cz,
+            zBox: currZ[sdcIndex] - cz - (sdcHeight / 2),
+            speed: currSpeed[sdcIndex] || 0
+         });
+    }
+
+    // Future
+    for (let t = 0; t < futureLen; t++) {
+         const idx = sdcIndex * futureLen + t;
+         trajectory.push({
+            x: futureX[idx] - cx,
+            y: futureY[idx] - cy,
+            z: futureZ[idx] - cz,
+            zBox: futureZ[idx] - cz - (sdcHeight / 2),
+            speed: futureSpeed[idx] || 0
+         });
+    }
+    
+    return { trajectory, height: sdcHeight };
+
+  }, [parsedMap, center]);
+
   const frameRef = useRef(0);
   const [isPlaying, setIsPlaying] = useState(true);
 
@@ -176,18 +550,18 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
   return (
     <div style={{ width: '100%', height: '100vh', position: 'relative', background: 'black' }}>
         <Canvas camera={{ position: [0, -20, 20], fov: 45, up: [0, 0, 1] }}>
-            <color attach="background" args={['#1a2b3c']} />
-            <ambientLight intensity={0.8} />
-            <pointLight position={[50, 50, 100]} intensity={1} />
+            <color attach="background" args={['#000000']} />
+            <ambientLight intensity={0.5} />
+            <pointLight position={[50, 50, 100]} intensity={1.5} />
             <OrbitControls makeDefault />
             <AnimationLoop />
             
             {parsedMap && <RoadGraph map={parsedMap} center={center} />}
-            {parsedMap && <SdcPathHighlight map={parsedMap} center={center} frameRef={frameRef} />}
-            {parsedMap && <PathSamples map={parsedMap} center={center} />}
-            {parsedMap && <Agents map={parsedMap} frameRef={frameRef} center={center} />} 
-            {parsedMap && <TrafficLights key="traffic-lights-spheres" map={parsedMap} frameRef={frameRef} center={center} />}
-            {parsedMap && <TrafficLightHighlight map={parsedMap} frameRef={frameRef} center={center} />}
+            {parsedMap && <SdcPathHighlight sdcState={parsedSdcState} frameRef={frameRef} />}
+            {parsedPathSamples && <PathSamples vertices={parsedPathSamples} />}
+            {parsedMap && <Agents agents={parsedAgents} frameRef={frameRef} />} 
+            {parsedTrafficLights && <TrafficLights key="traffic-lights-spheres" trafficLights={parsedTrafficLights} frameRef={frameRef} />}
+            {parsedSdcState && parsedTrafficLights && <TrafficLightHighlight sdcState={parsedSdcState} trafficLights={parsedTrafficLights} frameRef={frameRef} />}
             {(() => {
                  // Optimization: Params are checked inside render.
                  // It's fast enough, but cleaner to extract if we want perfectly clean render.

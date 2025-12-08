@@ -2,79 +2,11 @@ import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 
-export function SdcPathHighlight({ map, center, frameRef }) {
+export function SdcPathHighlight({ sdcState, frameRef }) {
     const { pathGeometry, totalSamples } = useMemo(() => {
-        if (!map) return { pathGeometry: null, totalSamples: 0 };
-
-        const getVal = (key) => {
-            const feat = map.get(key);
-            return feat?.floatList?.valueList || feat?.int64List?.valueList || [];
-        };
-
-        // Find SDC Index
-        const sdcList = getVal('state/is_sdc');
-        if (!sdcList.length) return { pathGeometry: null, totalSamples: 0 };
+        if (!sdcState) return { pathGeometry: null, totalSamples: 0 };
         
-        let sdcIndex = -1;
-        // Check for 1 (int64 might be string or number)
-        sdcIndex = sdcList.findIndex(v => v == 1);
-        if (sdcIndex === -1) return { pathGeometry: null, totalSamples: 0 };
-
-        const count = sdcList.length;
-
-        // Get Full Trajectory for SDC (Past + Current + Future)
-        const pastX = getVal('state/past/x');
-        const pastY = getVal('state/past/y');
-        const pastZ = getVal('state/past/z');
-        const currX = getVal('state/current/x');
-        const currY = getVal('state/current/y');
-        const currZ = getVal('state/current/z');
-        const futureX = getVal('state/future/x');
-        const futureY = getVal('state/future/y');
-        const futureZ = getVal('state/future/z');
-        
-        const heightList = getVal('state/current/height');
-        const sdcHeight = heightList[sdcIndex] || 1.6;
-        
-        const pastLen = pastX.length / count;
-        const futureLen = futureX.length / count;
-        
-        // Validation
-        if (count === 0) return { pathGeometry: null, totalSamples: 0 };
-
-        const [cx, cy, cz] = center;
-        const points = [];
-
-        // Past
-        for (let t = 0; t < pastLen; t++) {
-             const idx = sdcIndex * pastLen + t;
-             points.push(new THREE.Vector3(
-                pastX[idx] - cx,
-                pastY[idx] - cy,
-                pastZ[idx] - cz - (sdcHeight / 2)
-             ));
-        }
-
-        // Current
-        if (currX[sdcIndex] !== undefined) {
-             points.push(new THREE.Vector3(
-                currX[sdcIndex] - cx,
-                currY[sdcIndex] - cy,
-                currZ[sdcIndex] - cz - (sdcHeight / 2)
-             ));
-        }
-
-        // Future
-        for (let t = 0; t < futureLen; t++) {
-             const idx = sdcIndex * futureLen + t;
-             points.push(new THREE.Vector3(
-                futureX[idx] - cx,
-                futureY[idx] - cy,
-                futureZ[idx] - cz - (sdcHeight / 2)
-             ));
-        }
-        
-        if (points.length < 2) return { pathGeometry: null, totalSamples: 0 };
+        const points = sdcState.trajectory.map(p => new THREE.Vector3(p.x, p.y, p.zBox));
 
         if (points.length < 2) return { pathGeometry: null, totalSamples: 0 };
 
@@ -83,7 +15,7 @@ export function SdcPathHighlight({ map, center, frameRef }) {
         const vertices = [];
         const indices = [];
         const uvs = [];
-
+        
         for (let i = 0; i < points.length; i++) {
             const p = points[i];
             
@@ -131,7 +63,7 @@ export function SdcPathHighlight({ map, center, frameRef }) {
         
         return { pathGeometry: geo, totalSamples: points.length };
 
-    }, [map, center]);
+    }, [sdcState]);
 
     // Update Draw Range based on Frame
     // Use a ref to mesh to update geometry drawRange without excessive re-renders

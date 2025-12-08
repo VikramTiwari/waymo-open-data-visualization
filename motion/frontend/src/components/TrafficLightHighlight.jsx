@@ -1,109 +1,11 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { Billboard, Text } from '@react-three/drei';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 
-export function TrafficLightHighlight({ map, frameRef, center }) {
-    // 1. Get SDC Trajectory (Position + Speed)
-    const sdcState = useMemo(() => {
-        if (!map) return null;
-
-        const getVal = (key) => map.get(key)?.floatList?.valueList || map.get(key)?.int64List?.valueList || [];
-
-        const sdcList = getVal('state/is_sdc');
-        let sdcIndex = sdcList.indexOf(Number(1));
-        if (sdcIndex === -1) sdcIndex = sdcList.findIndex(v => v == 1);
-        if (sdcIndex === -1) return null;
-
-        const count = sdcList.length;
-
-        // Extract Trajectory
-        const pastX = getVal('state/past/x'); const pastY = getVal('state/past/y'); const pastZ = getVal('state/past/z');
-        const currX = getVal('state/current/x'); const currY = getVal('state/current/y'); const currZ = getVal('state/current/z');
-        const futureX = getVal('state/future/x'); const futureY = getVal('state/future/y'); const futureZ = getVal('state/future/z');
-        
-        const pastSpeed = getVal('state/past/speed');
-        const currSpeed = getVal('state/current/speed');
-        const futureSpeed = getVal('state/future/speed');
-
-        const pastLen = pastX.length / count;
-        const futureLen = futureX.length / count;
-        
-        const traj = [];
-        const [cx, cy, cz] = center;
-
-        // Past
-        for (let t = 0; t < pastLen; t++) {
-            traj.push({
-                x: pastX[sdcIndex * pastLen + t] - cx,
-                y: pastY[sdcIndex * pastLen + t] - cy,
-                z: pastZ[sdcIndex * pastLen + t] - cz,
-                speed: pastSpeed[sdcIndex * pastLen + t]
-            });
-        }
-        // Current
-        traj.push({
-            x: currX[sdcIndex] - cx,
-            y: currY[sdcIndex] - cy,
-            z: currZ[sdcIndex] - cz,
-            speed: currSpeed[sdcIndex]
-        });
-        // Future
-        for (let t = 0; t < futureLen; t++) {
-             traj.push({
-                x: futureX[sdcIndex * futureLen + t] - cx,
-                y: futureY[sdcIndex * futureLen + t] - cy,
-                z: futureZ[sdcIndex * futureLen + t] - cz,
-                speed: futureSpeed[sdcIndex * futureLen + t]
-            });
-        }
-        return traj;
-    }, [map, center]);
-
-    // 2. Get Traffic Lights Data
-    const lightStates = useMemo(() => {
-        if (!map) return [];
-        
-        const getVal = (key) => map.get(key)?.floatList?.valueList || map.get(key)?.int64List?.valueList || [];
-
-        const ids = getVal('traffic_light_state/current/id');
-        const count = ids.length;
-        if (count === 0) return [];
-        
-        const pastStates = getVal('traffic_light_state/past/state');
-        const currStates = getVal('traffic_light_state/current/state');
-        const futureStates = getVal('traffic_light_state/future/state');
-
-        // Positions
-        const currX = getVal('traffic_light_state/current/x');
-        const currY = getVal('traffic_light_state/current/y');
-        const currZ = getVal('traffic_light_state/current/z');
-        
-        const pastLen = pastStates.length / count;
-        const futureLen = futureStates.length / count;
-
-        const lights = [];
-        const [cx, cy, cz] = center;
-
-        for (let i = 0; i < count; i++) {
-            const traj = [];
-            // Past
-            for (let t = 0; t < pastLen; t++) traj.push(pastStates[i * pastLen + t]);
-            // Current
-            traj.push(currStates[i]);
-            // Future
-            for (let t = 0; t < futureLen; t++) traj.push(futureStates[i * futureLen + t]);
-
-            lights.push({
-                id: ids[i],
-                pos: new THREE.Vector3(currX[i] - cx, currY[i] - cy, currZ[i] - cz), // Lights usually static?
-                // Wait, Schema has past/future x/y/z. Lights MIGHT move? (e.g. temporary). But usually static.
-                // We'll use current pos for proximity check.
-                states: traj
-            });
-        }
-        return lights;
-    }, [map, center]);
+export function TrafficLightHighlight({ sdcState, trafficLights, frameRef }) {
+    // 1. SDC State is passed as prop
+    // 2. Traffic Lights Data is passed as prop
 
     // 3. Determine Display with Hysteresis
     // State to latch visibility
@@ -124,7 +26,10 @@ export function TrafficLightHighlight({ map, frameRef, center }) {
         if (throttleRef.current % 15 !== 0) return;
 
         const currentFrameIdx = Math.floor(frameRef.current);
-        const sdcPos = sdcState[Math.min(Math.max(0, currentFrameIdx), sdcState.length - 1)];
+        // SDC State is already {trajectory: [...]} 
+        // We need to access trajectory
+        const traj = sdcState.trajectory;
+        const sdcPos = traj[Math.min(Math.max(0, currentFrameIdx), traj.length - 1)];
         const sdcV = sdcPos.speed || 0;
 
         // If moving fast, bubble should definitely be hidden
@@ -141,15 +46,17 @@ export function TrafficLightHighlight({ map, frameRef, center }) {
 
         if (bubbleState.visible) {
             // Check ONLY the causing light
-            const causeLight = lightStates.find(l => l.id === bubbleState.causeId);
+            const causeLight = trafficLights.find(l => l.id === bubbleState.causeId);
             
             let shouldHide = false;
             
             if (!causeLight) {
                 shouldHide = true;
             } else {
-                const safeLightFrame = Math.min(Math.max(0, currentFrameIdx), causeLight.states.length - 1);
-                let state = causeLight.states[safeLightFrame];
+                // Light trajectory in parsedTrafficLights is array of objects {state: int}
+                const safeLightFrame = Math.min(Math.max(0, currentFrameIdx), causeLight.trajectory.length - 1);
+                const step = causeLight.trajectory[safeLightFrame];
+                let state = step ? step.state : 0;
                 
                 if (GREEN_STATES.includes(state)) {
                     shouldHide = true;
@@ -165,14 +72,16 @@ export function TrafficLightHighlight({ map, frameRef, center }) {
             let closestDistSq = Infinity;
             let foundLight = null;
 
-            for (const light of lightStates) {
-                const safeLightFrame = Math.min(Math.max(0, currentFrameIdx), light.states.length - 1);
-                const state = light.states[safeLightFrame];
+            for (const light of trafficLights) {
+                const safeLightFrame = Math.min(Math.max(0, currentFrameIdx), light.trajectory.length - 1);
+                const step = light.trajectory[safeLightFrame];
+                const state = step ? step.state : 0;
                 
                 // Only trigger on DEFINITIVE Red.
                 if (RED_STATES.includes(state)) {
-                    const dx = light.pos.x - sdcPos.x;
-                    const dy = light.pos.y - sdcPos.y;
+                    // light has x,y,z
+                    const dx = light.x - sdcPos.x;
+                    const dy = light.y - sdcPos.y;
                     // Optimization: Use squared distance to avoid Sqrt
                     const distSq = dx*dx + dy*dy;
                     
