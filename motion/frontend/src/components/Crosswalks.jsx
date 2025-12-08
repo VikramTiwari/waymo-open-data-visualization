@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { extend } from '@react-three/fiber';
 import { shaderMaterial } from '@react-three/drei';
 import earcut from 'earcut';
+import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 // Define the custom shader material
 const ZebraMaterial = shaderMaterial(
@@ -71,103 +72,104 @@ const ZebraMaterial = shaderMaterial(
 
 extend({ ZebraMaterial });
 
+function createCrosswalkGeometry(points) {
+    if (points.length < 3) return null;
+
+    // 1. Calculate center and local covariance to find principal axes (PCA)
+    const center = new THREE.Vector3();
+    points.forEach(p => center.add(p));
+    center.divideScalar(points.length);
+
+    // Compute covariance matrix
+    let xx = 0, xy = 0, yy = 0;
+    
+    // We primarily care about 2D orientation (X, Y) for stripes on the ground
+    const localPoints = points.map(p => p.clone().sub(center));
+    
+    localPoints.forEach(p => {
+        xx += p.x * p.x;
+        xy += p.x * p.y;
+        yy += p.y * p.y;
+    });
+
+    // 2x2 Covariance Matrix for X,Y plane
+    const trace = xx + yy;
+    const det = xx * yy - xy * xy;
+    const term = Math.sqrt(trace * trace - 4 * det);
+    const l1 = (trace + term) / 2; // Major eigenvalue
+
+    // Major eigenvector (Direction of Max Variance - typically LENGTH of crosswalk)
+    const vx = -xy;
+    const vy = xx - l1;
+    const len = Math.sqrt(vx * vx + vy * vy);
+    
+    const axisY = new THREE.Vector3(vx / len, vy / len, 0); // "Forward" / Walking direction
+    const axisX = new THREE.Vector3(-axisY.y, axisY.x, 0);  // "Right" / Width direction
+
+    // 2. Triangulate
+    const flatPoints = points.flatMap(p => [p.x, p.y]);
+    // Earcut works in 2D. 
+    // Usually points are roughly coplanar Z.
+    // If we use X,Y directly it works.
+    
+    const indices = earcut(flatPoints, null, 2);
+
+    if (indices.length === 0) return null;
+
+    // 3. Build BufferGeometry
+    const vertices = [];
+    const uvs = [];
+
+    // We push vertices and calculate UVs for each
+    points.forEach((p) => {
+        vertices.push(p.x, p.y, p.z);
+        
+        // Project p onto our axes to get UVs in METERS
+        // relative to center
+        const vec = p.clone().sub(center);
+        const u = vec.dot(axisX);
+        const v = vec.dot(axisY); // Along the walking direction
+        
+        uvs.push(u, v);
+    });
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    geo.setIndex(indices);
+    // No explicit computeVertexNormals needed for shader that uses UVs, 
+    // but beneficial for lighting if we used meshStandard. Here we use custom shader.
+    // But helpful for compatibility.
+    geo.computeVertexNormals();
+
+    return geo;
+}
+
 export const Crosswalks = React.memo(({ crosswalks }) => {
-    return (
-        <group>
-            {crosswalks.map((cw, i) => (
-                <Crosswalk key={i} points={cw.points} />
-            ))}
-        </group>
-    );
-});
+    const mergedGeometry = useMemo(() => {
+        if (!crosswalks || crosswalks.length === 0) return null;
 
-function Crosswalk({ points }) {
-    const geometry = useMemo(() => {
-        if (points.length < 3) return null;
-
-        // 1. Calculate center and local covariance to find principal axes (PCA)
-        const center = new THREE.Vector3();
-        points.forEach(p => center.add(p));
-        center.divideScalar(points.length);
-
-        // Compute covariance matrix
-        let xx = 0, xy = 0, yy = 0;
+        const geometries = [];
         
-        // We primarily care about 2D orientation (X, Y) for stripes on the ground
-        // Waymo 'Z' is up, so we look at X and Y.
-        // Wait, Waymo coordinates: Z is up? Yes.
-        
-        const localPoints = points.map(p => p.clone().sub(center));
-        
-        localPoints.forEach(p => {
-            xx += p.x * p.x;
-            xy += p.x * p.y;
-            yy += p.y * p.y;
+        crosswalks.forEach(cw => {
+            const geo = createCrosswalkGeometry(cw.points);
+            if (geo) {
+                geometries.push(geo);
+            }
         });
 
-        // 2x2 Covariance Matrix for X,Y plane
-        // [ xx  xy ]
-        // [ xy  yy ]
-        
-        // Eigenvalues/vectors calculation
-        // trace = xx + yy
-        // det = xx*yy - xy*xy
-        // lambda = (trace +/- sqrt(trace^2 - 4*det)) / 2
-        
-        const trace = xx + yy;
-        const det = xx * yy - xy * xy;
-        const term = Math.sqrt(trace * trace - 4 * det);
-        const l1 = (trace + term) / 2; // Major eigenvalue
-        // const l2 = (trace - term) / 2; // Minor eigenvalue
+        if (geometries.length === 0) return null;
 
-        // Major eigenvector (Direction of Max Variance - typically LENGTH of crosswalk)
-        // (xx - l1)vx + xy*vy = 0  =>  vx = -xy, vy = xx - l1  (or similar)
-        
-        const vx = -xy;
-        const vy = xx - l1;
-        const len = Math.sqrt(vx * vx + vy * vy);
-        
-        const axisY = new THREE.Vector3(vx / len, vy / len, 0); // "Forward" / Walking direction
-        const axisX = new THREE.Vector3(-axisY.y, axisY.x, 0);  // "Right" / Width direction
+        // Merge
+        const merged = BufferGeometryUtils.mergeGeometries(geometries, false);
+        return merged;
 
-        // 2. Triangulate
-        // Project 3D points to 2D for earcut
-        // We can just use X, Y directly as it's a flat plane mostly
-        const flatPoints = points.flatMap(p => [p.x, p.y]);
-        const indices = earcut(flatPoints, null, 2);
+    }, [crosswalks]);
 
-        if (indices.length === 0) return null;
-
-        // 3. Build BufferGeometry
-        const vertices = [];
-        const uvs = [];
-
-        // We push vertices and calculate UVs for each
-        points.forEach((p) => {
-            vertices.push(p.x, p.y, p.z);
-            
-            // Project p onto our axes to get UVs in METERS
-            // relative to center
-            const vec = p.clone().sub(center);
-            const u = vec.dot(axisX);
-            const v = vec.dot(axisY); // Along the walking direction
-            
-            uvs.push(u, v);
-        });
-
-        const geo = new THREE.BufferGeometry();
-        geo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-        geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-        geo.setIndex(indices);
-        geo.computeVertexNormals();
-
-        return geo;
-    }, [points]);
-
-    if (!geometry) return null;
+    if (!mergedGeometry) return null;
 
     return (
-        <mesh geometry={geometry}>
+        <mesh geometry={mergedGeometry}>
             {/* 
                polygonOffset is crucial to prevent z-fighting with the road surface.
                factor -1 pulls it TOWARDS the camera (on top of road).
@@ -180,4 +182,4 @@ function Crosswalk({ points }) {
             />
         </mesh>
     );
-}
+});

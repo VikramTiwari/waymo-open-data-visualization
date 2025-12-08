@@ -183,13 +183,13 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
             {data && <TrafficLights key="traffic-lights-spheres" data={data} frameRef={frameRef} center={center} />}
             {data && <TrafficLightHighlight data={data} frameRef={frameRef} center={center} />}
             {(() => {
-                const params = new URLSearchParams(window.location.search);
-                const audioEnabled = params.get('audio') !== 'false';
-                return audioEnabled && data && <TrafficAudio sdcSpeeds={sdcSpeeds} frameRef={frameRef} isPlaying={isPlaying} />;
+                 // Optimization: Params are checked inside render.
+                 // It's fast enough, but cleaner to extract if we want perfectly clean render.
+                 // However, for this block IIFE, it's fine.
+                 return (new URLSearchParams(window.location.search).get('audio') !== 'false') && data && <TrafficAudio sdcSpeeds={sdcSpeeds} frameRef={frameRef} isPlaying={isPlaying} />;
             })()}
             {(() => {
-                 const params = new URLSearchParams(window.location.search);
-                 const isAuto = params.get('autoCamera') !== 'false';
+                 const isAuto = new URLSearchParams(window.location.search).get('autoCamera') !== 'false';
                  return data && <CameraRig data={data} frameRef={frameRef} center={center} variant={variant} isAuto={isAuto} onCameraChange={setCameraName} />;
             })()}
         </Canvas>

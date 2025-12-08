@@ -1,17 +1,29 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useMemo, useRef, useEffect } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
+
+const TEMP_OBJECT = new THREE.Object3D();
+const TEMP_COLOR = new THREE.Color();
 
 export function TrafficLights({ data, frameRef, center }) {
     const trafficLights = useMemo(() => {
         const featureMap = data?.context?.featureMap;
         if (!featureMap) return [];
         
-        // Helper to handle map creation robustly
         let map;
         if (Array.isArray(featureMap)) {
-            map = new Map(featureMap);
+            // Check if it's already an array of [k, v] or objects
+            // The output of pruneData might be object, but input parsing here needs to be robust
+            if (featureMap.length > 0 && Array.isArray(featureMap[0])) {
+                 map = new Map(featureMap);
+            } else if (featureMap.length > 0 && typeof featureMap[0] === 'object') {
+                 // Array of objects {key, value}
+                 map = new Map(featureMap.map(e => [e.key, e.value]));
+            } else {
+                 map = new Map(); // Empty or unknown
+            }
         } else {
+             // It is an Object (from our pruned data)
              map = new Map(Object.entries(featureMap || {}));
         }
 
@@ -21,37 +33,22 @@ export function TrafficLights({ data, frameRef, center }) {
             return feat.floatList?.valueList || feat.int64List?.valueList || [];
         };
         
-        // Traffic light data is usually indexed by ID
-        // Note: The schema has traffic_light_state/current/id etc.
-        // We will retrieve all related fields.
-        
         const ids = getVal('traffic_light_state/current/id');
         const count = ids.length;
         if (count === 0) return [];
 
-        // Check availability of past/future data
-        // Sometimes traffic lights might not have full temporal history in the same way, or minimal history.
-        // Let's assume structure matches Agents: 10 past, 1 current, 80 future?
-        // Or sometimes it's just known at current state.
-        
-        // Let's inspect the lengths to be safe.
         const currentStates = getVal('traffic_light_state/current/state');
         const currentX = getVal('traffic_light_state/current/x');
         const currentY = getVal('traffic_light_state/current/y');
         const currentZ = getVal('traffic_light_state/current/z');
+        const currentValid = getVal('traffic_light_state/current/valid');
         
         const pastStates = getVal('traffic_light_state/past/state');
-        const pastX = getVal('traffic_light_state/past/x');
-        const pastY = getVal('traffic_light_state/past/y');
-        const pastZ = getVal('traffic_light_state/past/z');
-
-        const futureStates = getVal('traffic_light_state/future/state');
-        const futureX = getVal('traffic_light_state/future/x');
-        const futureY = getVal('traffic_light_state/future/y');
-        const futureZ = getVal('traffic_light_state/future/z');
+        const pastValid = getVal('traffic_light_state/past/valid');
         
-        // Determine lengths per agent
-        // If pastStates exists, it should be count * 10
+        const futureStates = getVal('traffic_light_state/future/state');
+        const futureValid = getVal('traffic_light_state/future/valid');
+        
         const pastLen = pastStates.length > 0 ? (pastStates.length / count) : 0;
         const futureLen = futureStates.length > 0 ? (futureStates.length / count) : 0;
         
@@ -60,64 +57,74 @@ export function TrafficLights({ data, frameRef, center }) {
         const parsedLights = [];
         
         for (let i = 0; i < count; i++) {
+            // If current is invalid, should we skip?
+            // Usually valid=1 means valid.
+            if (currentValid && currentValid[i] === 0) continue;
+
             const trajectory = [];
             
             // Past
             for (let t = 0; t < pastLen; t++) {
                 const idx = i * pastLen + t;
+                // Check validity if available
+                 if (pastValid && pastValid[idx] === 0) {
+                     trajectory.push(null);
+                     continue;
+                 }
                 trajectory.push({
                     state: pastStates[idx],
-                    x: (pastX[idx] || 0) - cx,
-                    y: (pastY[idx] || 0) - cy,
-                    z: (pastZ[idx] || 0) - cz
+                    // We assume static position for lights, so we use current XYZ for all frames?
+                    // Or do we actually have past XYZ?
+                    // Schema *has* past/x/y/z in whitelist.
+                    // But in this specific component logic, previous version used pastX/Y/Z.
+                    // Let's stick to using current pos for static lights to save memory/perf if they don't move.
+                    // But wait, previous code read pastX...
+                    // Let's assume static. It's safer for perf and usually true.
+                    // If we need moving lights, we can add it back.
                 });
             }
             
             // Current
             trajectory.push({
-                state: currentStates[i],
-                x: (currentX[i] || 0) - cx,
-                y: (currentY[i] || 0) - cy,
-                z: (currentZ[i] || 0) - cz
+                state: currentStates[i]
             });
             
             // Future
             for (let t = 0; t < futureLen; t++) {
                 const idx = i * futureLen + t;
+                if (futureValid && futureValid[idx] === 0) {
+                     trajectory.push(null);
+                     continue;
+                 }
                 trajectory.push({
-                    state: futureStates[idx],
-                    x: (futureX[idx] || 0) - cx,
-                    y: (futureY[idx] || 0) - cy,
-                    z: (futureZ[idx] || 0) - cz
+                    state: futureStates[idx]
                 });
             }
             
+            // Position
+            const x = (currentX[i] || 0) - cx;
+            const y = (currentY[i] || 0) - cy;
+            const z = (currentZ[i] || 0) - cz;
+
             parsedLights.push({
                 id: ids[i],
+                x, y, z,
                 trajectory
             });
         }
         
-        
-        // Dedup / Cluster Lights
-        // Waymo data might have multiple signal IDs for the same physical location (different lanes).
-        // This causes z-fighting if we render them all at once.
+        // Dedup / Cluster
         const uniqueLights = [];
-        const seenPos = []; // Simple distance check
+        const seenPos = [];
         
         for (const light of parsedLights) {
-            // Get initial position (frame 0) or just first valid position?
-            // Light trajectory positions are usually static.
-            const p = light.trajectory[0]; 
-            if (!p) continue;
-            
             let duplicate = false;
             for (const sp of seenPos) {
-                const dx = sp.x - p.x;
-                const dy = sp.y - p.y;
-                const dz = sp.z - p.z;
+                const dx = sp.x - light.x;
+                const dy = sp.y - light.y;
+                const dz = sp.z - light.z;
                 const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
-                if (dist < 0.2) { // 20cm threshold
+                if (dist < 0.2) { 
                     duplicate = true;
                     break;
                 }
@@ -125,80 +132,82 @@ export function TrafficLights({ data, frameRef, center }) {
             
             if (!duplicate) {
                 uniqueLights.push(light);
-                seenPos.push({ x: p.x, y: p.y, z: p.z });
+                seenPos.push({ x: light.x, y: light.y, z: light.z });
             }
         }
         
         return uniqueLights;
     }, [data, center]);
 
-    return (
-        <group>
-            {trafficLights.map((light, idx) => (
-                <TrafficLightItem key={`${light.id}-${idx}`} light={light} frameRef={frameRef} />
-            ))}
-        </group>
-    );
-}
+    const casingRef = useRef();
+    const bulbRef = useRef();
 
-function TrafficLightItem({ light, frameRef }) {
-    const meshRef = useRef();
-    const lastStateRef = useRef(-1);
+    // Initial Setup (Matrices)
+    useEffect(() => {
+        if (!casingRef.current || !bulbRef.current || trafficLights.length === 0) return;
+
+        trafficLights.forEach((light, i) => {
+            TEMP_OBJECT.position.set(light.x, light.y, light.z);
+            TEMP_OBJECT.rotation.set(0, 0, 0); // Todo: Yaw? Lights usually have orientation.
+            // Current schema has traffic_light_state/current/x,y,z but NO quantization of yaw/axis in this list?
+            // "state/current/bbox_yaw" is for agents.
+            // Traffic lights in Waymo are usually point features with state. 
+            // Orientation might be in roadgraph/samples or implicit?
+            // Previous code didn't rotate them.
+            TEMP_OBJECT.scale.set(1, 1, 1);
+            TEMP_OBJECT.updateMatrix();
+
+            casingRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
+            bulbRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
+        });
+        
+        casingRef.current.instanceMatrix.needsUpdate = true;
+        bulbRef.current.instanceMatrix.needsUpdate = true;
+    }, [trafficLights]);
 
     useFrame(() => {
-        if (!frameRef || !meshRef.current) return;
-        
-        const frame = frameRef.current;
-        const safeFrame = Math.min(Math.floor(frame), light.trajectory.length - 1);
-        const step = light.trajectory[safeFrame];
+        if (!frameRef || !bulbRef.current || trafficLights.length === 0) return;
 
-        if (!step) return;
+        const currentFrame = frameRef.current;
+        
+        trafficLights.forEach((light, i) => {
+            const traj = light.trajectory;
+            const idx = Math.min(Math.floor(currentFrame), traj.length - 1);
+            const step = traj[idx];
 
-        // Position update (usually static, but good to be safe)
-        // meshRef.current.position.set(step.x, step.y, step.z); // Parent group handles position? Wait, parent map passes loop key, but item renders group.
-        // Ah, looking at previous code, Item returned a group with position.
-        // We should update the ref to the group.
+            if (step) {
+                const colorHex = getStateColor(step.state);
+                TEMP_COLOR.set(colorHex);
+            } else {
+                TEMP_COLOR.set('#808080'); // Gray/Off
+            }
+            bulbRef.current.setColorAt(i, TEMP_COLOR);
+        });
         
-        const currentState = step.state;
-        
-        if (currentState !== lastStateRef.current) {
-             const color = getStateColor(currentState);
-             // Ref is attached to meshBasicMaterial, so current IS the material
-             if (meshRef.current) meshRef.current.color.set(color);
-             lastStateRef.current = currentState;
-        }
+        bulbRef.current.instanceColor.needsUpdate = true;
     });
 
-    // Initial position from first frame (static)
-    const initialStep = light.trajectory[0];
-    if (!initialStep) return null;
-
     return (
-        <group position={[initialStep.x, initialStep.y, initialStep.z]}>
-             {/* Casing */}
-            <mesh>
-                <boxGeometry args={[0.5, 0.5, 1.2]} />
-                <meshStandardMaterial color="#222" />
-            </mesh>
-            {/* Light */}
-            <mesh>
-                <sphereGeometry args={[0.3, 16, 16]} />
-                {/* We use a ref for the material to update color imperatively */}
-                <meshBasicMaterial ref={meshRef} color="#808080" toneMapped={false} />
-            </mesh>
+        <group>
+            {/* Casing Instances */}
+            {trafficLights.length > 0 && (
+                <instancedMesh ref={casingRef} args={[null, null, trafficLights.length]}>
+                    <boxGeometry args={[0.5, 0.5, 1.2]} />
+                    <meshStandardMaterial color="#222" />
+                </instancedMesh>
+            )}
+            
+            {/* Bulb Instances */}
+            {trafficLights.length > 0 && (
+                <instancedMesh ref={bulbRef} args={[null, null, trafficLights.length]}>
+                     <sphereGeometry args={[0.3, 16, 16]} />
+                     <meshBasicMaterial toneMapped={false} />
+                </instancedMesh>
+            )}
         </group>
     );
 }
 
-// State Mapping (Standard Waymo Open Dataset)
-// 1: ARROW_STOP
-// 2: ARROW_CAUTION
-// 3: ARROW_GO
-// 4: STOP
-// 5: CAUTION
-// 6: GO
-// 7: FLASHING_STOP
-// 8: FLASHING_CAUTION
 function getStateColor(state) {
     switch (state) {
         case 1: // Arrow Stop (Red)

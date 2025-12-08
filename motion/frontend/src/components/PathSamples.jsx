@@ -1,74 +1,85 @@
 import React, { useMemo } from 'react';
-import { Line } from '@react-three/drei';
 import * as THREE from 'three';
 
 function PathSamplesComponent({ data, center }) {
-    const lines = useMemo(() => {
+    const geometry = useMemo(() => {
         const featureMap = data?.context?.featureMap;
-        if (!featureMap) return [];
+        if (!featureMap) return null;
         
         let map;
+        // Robust parsing (just in case prune changed things)
         if (Array.isArray(featureMap)) {
-            map = new Map(featureMap);
+            if (featureMap.length > 0 && Array.isArray(featureMap[0])) {
+                 map = new Map(featureMap);
+            } else if (featureMap.length > 0 && typeof featureMap[0] === 'object') {
+                 map = new Map(featureMap.map(e => [e.key, e.value]));
+            } else {
+                 map = new Map(); 
+            }
         } else {
              map = new Map(Object.entries(featureMap || {}));
         }
         
-        // Helper to get values
         const getVal = (key) => {
             const feat = map.get(key);
-            if (!feat) {
-                return [];
-            }
+            if (!feat) return [];
             return feat.floatList?.valueList || feat.int64List?.valueList || [];
         };
 
-        // Schema keys:
-        // "path_samples/arc_length"
-        // "path_samples/id"
-        // ...
-        // "roadgraph_samples/xyz"
-        
-        // So we will use "path_samples/xyz"
-        
         const rawXyz = getVal('path_samples/xyz');
         const ids = getVal('path_samples/id');
 
-        if (!rawXyz.length || !ids.length) return [];
+        if (!rawXyz.length || !ids.length) return null;
         
-        const segments = {};
         const [cx, cy, cz] = center;
+        
+        // We have a flat list of points. We need to reconstruct segments.
+        // The data comes as sets of points per ID.
+        // We assume they appear sequentially per ID in the arrays? 
+        // Waymo data layout: path_samples is repeated field.
+        // Usually, 'ids' has one entry per *point*. Wait.
+        // Let's verify schema: 'path_samples/id' is length N. 'path_samples/xyz' is length 3*N.
+        // Yes, each point has an ID.
+        // So a path is a sequence of points with the SAME id.
+        // We assume sequential ordering in the file (it is).
+        
+        const vertices = [];
+        
+        let prevId = null;
+        // Keep track of previous point to form segment (prev -> curr)
+        let px = 0, py = 0, pz = 0;
 
         for (let i = 0; i < ids.length; i++) {
             const id = ids[i];
-            if (!segments[id]) {
-                segments[id] = [];
-            }
-            
             const x = rawXyz[i*3] - cx;
             const y = rawXyz[i*3+1] - cy;
             const z = rawXyz[i*3+2] - cz;
             
-            segments[id].push(new THREE.Vector3(x, y, z));
+            if (id === prevId) {
+                // Continuation of same path: add segment [prev, curr]
+                vertices.push(px, py, pz);
+                vertices.push(x, y, z);
+            }
+            
+            // Update prev
+            prevId = id;
+            px = x; py = y; pz = z;
         }
         
-        return Object.values(segments).filter(pts => pts.length > 1);
+        if (vertices.length === 0) return null;
+        
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+        return geo;
 
     }, [data, center]);
 
+    if (!geometry) return null;
+
     return (
-        <group>
-            {lines.map((points, idx) => (
-                <Line 
-                    key={idx} 
-                    points={points} 
-                    color="#00FFFF" // Cyan
-                    opacity={0.5}
-                    transparent
-                    lineWidth={1} 
-                />
-            ))}
-        </group>
+        <lineSegments geometry={geometry}>
+            <lineBasicMaterial color="#00FFFF" opacity={0.5} transparent />
+        </lineSegments>
     );
 }
 
