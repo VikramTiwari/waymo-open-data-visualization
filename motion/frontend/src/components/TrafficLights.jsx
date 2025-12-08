@@ -103,14 +103,29 @@ export function TrafficLights({ data, frame, center }) {
     return (
         <group>
             {trafficLights.map((light, idx) => {
-                const step = light.trajectory[frame];
-                // Fallback to last known position if frame out of partial bounds? 
-                // However, our scene generally syncs frame 0..90.
-                // If light data is missing for some frames, we hide it.
+                // Safe Frame Access with Clamping
+                const safeFrame = Math.min(frame, light.trajectory.length - 1);
+                
+                // Get Step
+                let step = light.trajectory[safeFrame];
                 if (!step) return null;
                 
+                // Fix Flickering: If state is 0 (Unknown), look back for last known valid state
+                let displayState = step.state;
+                if (displayState === 0) {
+                     // scan backwards
+                     for (let t = safeFrame - 1; t >= 0; t--) {
+                         if (light.trajectory[t].state !== 0) {
+                             displayState = light.trajectory[t].state;
+                             break;
+                         }
+                     }
+                }
+                
+                // If still 0, maybe look forward? Or just default to Gray.
+                
                 // Get Color
-                const color = getStateColor(step.state);
+                const color = getStateColor(displayState);
                 
                 // Basic visualization: A small sphere or box at the location
                 // Traffic lights are usually up high. Z might already reflect that.

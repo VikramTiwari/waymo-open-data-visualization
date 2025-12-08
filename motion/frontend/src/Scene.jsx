@@ -6,6 +6,8 @@ import { Agents } from './components/Agents';
 import { CameraRig } from './components/CameraRig';
 import { TrafficLights } from './components/TrafficLights';
 import { PathSamples } from './components/PathSamples';
+import { SdcPathHighlight } from './components/SdcPathHighlight';
+import { TrafficLightHighlight } from './components/TrafficLightHighlight';
 
 export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
   const [frame, setFrame] = useState(0);
@@ -165,9 +167,11 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
             <AnimationLoop />
             
             {data && <RoadGraph data={data} center={center} />}
+            {data && <SdcPathHighlight data={data} center={center} frame={frame} />}
             {data && <PathSamples data={data} center={center} />}
             {data && <Agents data={data} frameRef={frameRef} center={center} />} 
             {data && <TrafficLights key="traffic-lights-spheres" data={data} frame={frame} center={center} />}
+            {data && <TrafficLightHighlight data={data} frame={frame} center={center} />}
             {data && <CameraRig data={data} frameRef={frameRef} center={center} variant={variant} />}
         </Canvas>
         

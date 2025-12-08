@@ -138,20 +138,14 @@ export function RoadGraph({ data, center }) {
                 </mesh>
             ))}
             
-            {/* Speed Bumps (Volumetric Tubes with Stripes) */}
+            {/* Speed Bumps (Volumetric Tubes - Solid Bright Yellow) */}
             {speedBumps.map((bump, idx) => {
-                 // Create texture if it doesn't exist
-                 // We can't easily create a texture inside the map effectively without hooks or global
-                 // Better to move texture creation to useMemo above.
-                 // But for now, let's use a procedural shader or just a texture created once.
-                 
-                 // Actually, let's create the texture in the useMemo above to avoid recreating it every render
                  return (
                     <mesh key={idx}>
                         <tubeGeometry args={[bump.curve, 20, 0.3, 8, false]} />
                         <meshStandardMaterial 
-                            map={speedBumpTexture}
-                            roughness={0.8}
+                            color="#FFFF00" // Bright Yellow
+                            roughness={0.6}
                             metalness={0.1}
                         />
                     </mesh>

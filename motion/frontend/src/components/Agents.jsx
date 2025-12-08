@@ -96,6 +96,24 @@ export function Agents({ data, frameRef, center }) {
                 pushStep(futureX[idx], futureY[idx], futureZ[idx], futureYaw[idx], futureVx[idx], futureVy[idx]);
             }
             
+            // Calculate Acceleration (Simple backward diff or central diff)
+            // accel = deltaV / deltaT (deltaT is 0.1s)
+            for (let t = 0; t < trajectory.length - 1; t++) {
+                const step = trajectory[t];
+                const next = trajectory[t + 1];
+                
+                // Calculate acceleration based on speed difference (scalar acceleration)
+                // Speed = sqrt(vx*vx + vy*vy)
+                // Accel = (Speed_next - Speed_curr) / 0.1
+                
+                const speedCurr = Math.sqrt(step.vx*step.vx + step.vy*step.vy);
+                const speedNext = Math.sqrt(next.vx*next.vx + next.vy*next.vy);
+                const accel = (speedNext - speedCurr) / 0.1;
+                step.accel = accel;
+            }
+            // Last point accel
+            if (trajectory.length > 0) trajectory[trajectory.length - 1].accel = 0;
+
             const isSdc = isSdcList && isSdcList[i] == 1;
 
             parsedAgents.push({
@@ -122,6 +140,7 @@ function AgentItem({ agent, frameRef }) {
     const groupRef = useRef();
     const arrowRef = useRef();
     const bodyRef = useRef();
+    const [isBraking, setIsBraking] = React.useState(false);
 
     useFrame(() => {
         if (!frameRef) return;
@@ -146,7 +165,7 @@ function AgentItem({ agent, frameRef }) {
 
         // Linear Interpolation
         // If step2 exists, lerp. Else stick to step1.
-        let x, y, z, yaw, vx, vy;
+        let x, y, z, yaw, vx, vy, accel;
         
         if (step2 && step1 !== step2) {
              x = THREE.MathUtils.lerp(step1.x, step2.x, alpha);
@@ -164,9 +183,13 @@ function AgentItem({ agent, frameRef }) {
              
              vx = THREE.MathUtils.lerp(step1.vx, step2.vx, alpha);
              vy = THREE.MathUtils.lerp(step1.vy, step2.vy, alpha);
+             
+             // Interpolate accel
+             accel = THREE.MathUtils.lerp(step1.accel || 0, step2.accel || 0, alpha);
         } else {
              x = step1.x; y = step1.y; z = step1.z;
              yaw = step1.yaw; vx = step1.vx; vy = step1.vy;
+             accel = step1.accel || 0;
         }
 
         if (groupRef.current) {
@@ -177,31 +200,22 @@ function AgentItem({ agent, frameRef }) {
             bodyRef.current.rotation.set(0, 0, yaw);
         }
 
+        // Update Braking State (Threshold: -1.0 m/s^2)
+        // Only update state if meaningful change to avoid react re-render thrashing?
+        // Actually modifying state inside useFrame triggers re-render of component.
+        // We generally avoid setState in useFrame unless throttled or necessary.
+        // But for visual prop `isBraking`, we need it.
+        const brakingNow = accel < -1.0;
+        if (brakingNow !== isBraking) {
+            setIsBraking(brakingNow);
+        }
+
         if (arrowRef.current) {
             const speed = Math.sqrt(vx*vx + vy*vy);
             if (speed > 0.5) {
                 arrowRef.current.visible = true;
                 const arrowYaw = Math.atan2(vy, vx);
                 arrowRef.current.rotation.set(0, 0, arrowYaw);
-                // Adjust length/scale if we initialized geometry for size 1
-                // Current geometry: <boxGeometry args={[speed, 0.1, 0.1]} /> in previous code.
-                // Recreating geometry every frame is bad.
-                // Better to scale a unit geometry.
-                // Previous code: <mesh position={[speed/2, ...]}>
-                // We should handle this.
-                // For simplicity, let's just make arrowRef point to the group containing shaft+head and scale it?
-                // The shaft length depends on speed. The head is fixed size at the end.
-                // It's tricky to animate geometry params without re-render.
-                // Let's just update the position/rotation of children meshes if we can get refs to them?
-                // Or: simpler, render the arrow entirely in React (it's simple primitives) but position it with the Group.
-                // BUT if arrow length changes, we need to update args or scale.
-                // If we use scale, the head gets distorted if we scale the whole group.
-                // We can just hide the arrow for now to simplify, or keep it static size, or implement a specific updating arrow component.
-                // Given "Jitter" is the main concern, fixing the CAR motion is priority.
-                // I will skip complex arrow animation for this specific 'jitter' fix iteration, just show it if speed > 0.5.
-                // Re-enabling arrow with correct visuals: if we just render it inside the component, it might lag or update at 60fps if we use useFrame?
-                // Actually, if we put the meshes in the JSX, we can ref their props?
-                // React-Three-Fiber `useFrame` can update refs.
             } else {
                 arrowRef.current.visible = false;
             }
@@ -218,7 +232,7 @@ function AgentItem({ agent, frameRef }) {
         <group ref={groupRef}>
              <group ref={bodyRef}>
                 {agent.isSdc ? (
-                        <WaymoCar dims={agent.dims} />
+                        <WaymoCar dims={agent.dims} isBraking={isBraking} />
                 ) : agent.type === 2 ? (
                         <PedestrianAsset />
                 ) : agent.type === 4 ? (

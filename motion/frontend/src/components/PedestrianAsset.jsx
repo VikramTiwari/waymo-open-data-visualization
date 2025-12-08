@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 
-export function PedestrianAsset({ color = '#FF9800' }) {
+export function PedestrianAsset({ color = '#4285F4' }) {
     // Mannequin style:
     // H: ~1.75m
     const torsoHeight = 0.5;

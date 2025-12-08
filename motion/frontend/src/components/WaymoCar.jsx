@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import * as THREE from 'three';
 
-export function WaymoCar({ dims = [4.68, 2.0, 1.56] }) {
+export function WaymoCar({ dims = [4.68, 2.0, 1.56], isBraking = false }) {
     // Default Waymo I-Pace dimensions
     // L: 4.68, W: 2.0, H: 1.56
     const [length, width, height] = dims;
@@ -123,8 +123,19 @@ export function WaymoCar({ dims = [4.68, 2.0, 1.56] }) {
              <Light position={[length * 0.5 + 0.1, height * 0.35, -width * 0.38]} color="#E0E0FF" scale={[1, 1.2, 1.2]} />
              
              {/* Taillights (Rear) - Red */}
-             <Light position={[-length * 0.48, height * 0.45, width * 0.35]} color="#FF0000" intensity={2} scale={[1, 0.8, 1]} />
-             <Light position={[-length * 0.48, height * 0.45, -width * 0.35]} color="#FF0000" intensity={2} scale={[1, 0.8, 1]} />
+             {/* Brighten if braking */}
+             <Light 
+                position={[-length * 0.48, height * 0.45, width * 0.35]} 
+                color="#FF0000" 
+                intensity={isBraking ? 5.0 : 2.0} 
+                scale={[1, 0.8, 1]} 
+             />
+             <Light 
+                position={[-length * 0.48, height * 0.45, -width * 0.35]} 
+                color="#FF0000" 
+                intensity={isBraking ? 5.0 : 2.0} 
+                scale={[1, 0.8, 1]} 
+             />
         </group>
     );
 }
