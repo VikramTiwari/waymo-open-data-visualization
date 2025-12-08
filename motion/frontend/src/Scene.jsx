@@ -23,19 +23,34 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
   const speedUiRef = useRef();
 
   // Calculate generic center to keep everything near 0,0,0
-  const center = useMemo(() => {
-    if (!data) return [0, 0, 0];
+  // Optimization Phase 10: Parse Once, Pass Everywhere
+  const parsedMap = useMemo(() => {
+    if (!data) return null;
     const featureMap = data?.context?.featureMap;
     // Robust map creation
     let map;
-    if (Array.isArray(featureMap)) map = new Map(featureMap);
-    else map = new Map(Object.entries(featureMap || {}));
+    if (Array.isArray(featureMap)) {
+         if (featureMap.length > 0 && Array.isArray(featureMap[0])) {
+             map = new Map(featureMap);
+         } else if (featureMap.length > 0 && typeof featureMap[0] === 'object') {
+             map = new Map(featureMap.map(e => [e.key, e.value]));
+         } else {
+             map = new Map();
+         }
+    } else {
+        map = new Map(Object.entries(featureMap || {}));
+    }
+    return map;
+  }, [data]);
+
+  const center = useMemo(() => {
+    if (!parsedMap) return [0, 0, 0];
     
     // Try to find SDC
-    const sdcList = map.get('state/is_sdc')?.int64List?.valueList;
-    const xList = map.get('state/current/x')?.floatList?.valueList;
-    const yList = map.get('state/current/y')?.floatList?.valueList;
-    const zList = map.get('state/current/z')?.floatList?.valueList;
+    const sdcList = parsedMap.get('state/is_sdc')?.int64List?.valueList;
+    const xList = parsedMap.get('state/current/x')?.floatList?.valueList;
+    const yList = parsedMap.get('state/current/y')?.floatList?.valueList;
+    const zList = parsedMap.get('state/current/z')?.floatList?.valueList;
 
     if (!xList || !yList) return [0, 0, 0];
 
@@ -43,8 +58,6 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
     let sdcIndex = -1;
     if (sdcList) {
         sdcIndex = sdcList.indexOf(Number(1)); 
-        // JSON parsing of int64 often results in strings if too large, or numbers.
-        // Let's safe find
         if (sdcIndex === -1) sdcIndex = sdcList.findIndex(v => v == 1);
     }
     
@@ -52,33 +65,21 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
     if (sdcIndex === -1) sdcIndex = 0;
     
     return [xList[sdcIndex] || 0, yList[sdcIndex] || 0, zList[sdcIndex] || 0];
-  }, [data]);
+  }, [parsedMap]);
 
   const scenarioId = useMemo(() => {
-     if (!data) return null;
-     const featureMap = data?.context?.featureMap;
-     let map;
-     if (Array.isArray(featureMap)) map = new Map(featureMap);
-     else map = new Map(Object.entries(featureMap || {}));
-     
-     const idVal = map.get('scenario/id')?.bytesList?.valueList?.[0];
+     if (!parsedMap) return null;
+     const idVal = parsedMap.get('scenario/id')?.bytesList?.valueList?.[0];
      if (!idVal) return 'Unknown';
-     // If it's base64 (common in JSON for bytes), we might want to decode, but often the ID is just the string.
-     // Let's return it as is first.
      return String(idVal);
-  }, [data]);
+  }, [parsedMap]);
 
   // Extract SDC Speed Trajectory
   const sdcSpeeds = useMemo(() => {
-    if (!data) return [];
-    
-    const featureMap = data?.context?.featureMap;
-    let map;
-    if (Array.isArray(featureMap)) map = new Map(featureMap);
-    else map = new Map(Object.entries(featureMap || {}));
+    if (!parsedMap) return [];
     
     // 1. Find SDC Index
-    const sdcList = map.get('state/is_sdc')?.int64List?.valueList;
+    const sdcList = parsedMap.get('state/is_sdc')?.int64List?.valueList;
     if (!sdcList) return [];
     
     let sdcIndex = sdcList.indexOf(Number(1));
@@ -87,7 +88,7 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
 
     // 2. Get Speed Data
     const getVal = (key) => {
-        const feat = map.get(key);
+        const feat = parsedMap.get(key);
         return feat?.floatList?.valueList || [];
     }
     
@@ -115,20 +116,20 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
     }
     
     return speeds;
-  }, [data]);
+  }, [parsedMap]);
 
   const frameRef = useRef(0);
   const [isPlaying, setIsPlaying] = useState(true);
 
   // Animation Loop Component
   const AnimationLoop = () => {
+      // Render Counter Ref
+      const renderCounter = useRef(0);
+
       useFrame((state, delta) => {
           if (!isPlaying) return;
           
           // Advance frame
-          // Data is 10Hz (0.1s per frame).
-          // We want 1 frame per 0.1s.
-          // speed = 10 frames per second.
           const speed = 10; 
           frameRef.current += delta * speed;
 
@@ -141,15 +142,20 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
              frameRef.current = TOTAL_FRAMES - 1; 
           }
 
-          // Imperative UI Updates
-          const currentFrame = Math.floor(frameRef.current);
-          if (frameUiRef.current) {
-               frameUiRef.current.innerText = `Frame: ${currentFrame} / ${TOTAL_FRAMES}`;
-          }
-          if (speedUiRef.current) {
-              const spd = sdcSpeeds[currentFrame] !== undefined ? sdcSpeeds[currentFrame] : 0;
-              speedUiRef.current.innerText = `Speed: ${spd.toFixed(2)} m/s`;
-          }
+          // Imperative UI Updates - Throttled
+          const currentFrameInt = Math.floor(frameRef.current);
+           
+          renderCounter.current++;
+           
+          if (renderCounter.current % 10 === 0) {
+              if (frameUiRef.current) {
+                   frameUiRef.current.innerText = `Frame: ${currentFrameInt} / ${TOTAL_FRAMES}`;
+              }
+              if (speedUiRef.current) {
+                  const spd = sdcSpeeds[currentFrameInt] !== undefined ? sdcSpeeds[currentFrameInt] : 0;
+                  speedUiRef.current.innerText = `Speed: ${spd.toFixed(2)} m/s`;
+              }
+           }
       });
       return null;
   };
@@ -176,21 +182,21 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
             <OrbitControls makeDefault />
             <AnimationLoop />
             
-            {data && <RoadGraph data={data} center={center} />}
-            {data && <SdcPathHighlight data={data} center={center} frameRef={frameRef} />}
-            {data && <PathSamples data={data} center={center} />}
-            {data && <Agents data={data} frameRef={frameRef} center={center} />} 
-            {data && <TrafficLights key="traffic-lights-spheres" data={data} frameRef={frameRef} center={center} />}
-            {data && <TrafficLightHighlight data={data} frameRef={frameRef} center={center} />}
+            {parsedMap && <RoadGraph map={parsedMap} center={center} />}
+            {parsedMap && <SdcPathHighlight map={parsedMap} center={center} frameRef={frameRef} />}
+            {parsedMap && <PathSamples map={parsedMap} center={center} />}
+            {parsedMap && <Agents map={parsedMap} frameRef={frameRef} center={center} />} 
+            {parsedMap && <TrafficLights key="traffic-lights-spheres" map={parsedMap} frameRef={frameRef} center={center} />}
+            {parsedMap && <TrafficLightHighlight map={parsedMap} frameRef={frameRef} center={center} />}
             {(() => {
                  // Optimization: Params are checked inside render.
                  // It's fast enough, but cleaner to extract if we want perfectly clean render.
                  // However, for this block IIFE, it's fine.
-                 return (new URLSearchParams(window.location.search).get('audio') !== 'false') && data && <TrafficAudio sdcSpeeds={sdcSpeeds} frameRef={frameRef} isPlaying={isPlaying} />;
+                 return (new URLSearchParams(window.location.search).get('audio') !== 'false') && parsedMap && <TrafficAudio sdcSpeeds={sdcSpeeds} frameRef={frameRef} isPlaying={isPlaying} />;
             })()}
             {(() => {
                  const isAuto = new URLSearchParams(window.location.search).get('autoCamera') !== 'false';
-                 return data && <CameraRig data={data} frameRef={frameRef} center={center} variant={variant} isAuto={isAuto} onCameraChange={setCameraName} />;
+                 return parsedMap && <CameraRig map={parsedMap} frameRef={frameRef} center={center} variant={variant} isAuto={isAuto} onCameraChange={setCameraName} />;
             })()}
         </Canvas>
         

@@ -1,30 +1,17 @@
 import React, { useMemo } from 'react';
 import * as THREE from 'three';
 
-function PathSamplesComponent({ data, center }) {
+function PathSamplesComponent({ map, center }) {
     const geometry = useMemo(() => {
-        const featureMap = data?.context?.featureMap;
-        if (!featureMap) return null;
-        
-        let map;
-        // Robust parsing (just in case prune changed things)
-        if (Array.isArray(featureMap)) {
-            if (featureMap.length > 0 && Array.isArray(featureMap[0])) {
-                 map = new Map(featureMap);
-            } else if (featureMap.length > 0 && typeof featureMap[0] === 'object') {
-                 map = new Map(featureMap.map(e => [e.key, e.value]));
-            } else {
-                 map = new Map(); 
-            }
-        } else {
-             map = new Map(Object.entries(featureMap || {}));
-        }
+        if (!map) return null;
         
         const getVal = (key) => {
             const feat = map.get(key);
             if (!feat) return [];
             return feat.floatList?.valueList || feat.int64List?.valueList || [];
         };
+        
+
 
         const rawXyz = getVal('path_samples/xyz');
         const ids = getVal('path_samples/id');
@@ -72,7 +59,7 @@ function PathSamplesComponent({ data, center }) {
         geo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
         return geo;
 
-    }, [data, center]);
+    }, [map, center]);
 
     if (!geometry) return null;
 

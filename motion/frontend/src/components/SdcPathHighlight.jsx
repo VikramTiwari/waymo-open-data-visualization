@@ -2,17 +2,9 @@ import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 
-export function SdcPathHighlight({ data, center, frameRef }) {
+export function SdcPathHighlight({ map, center, frameRef }) {
     const { pathGeometry, totalSamples } = useMemo(() => {
-        const featureMap = data?.context?.featureMap;
-        if (!featureMap) return { pathGeometry: null, totalSamples: 0 };
-        
-        let map;
-        if (Array.isArray(featureMap)) {
-            map = new Map(featureMap);
-        } else {
-             map = new Map(Object.entries(featureMap || {}));
-        }
+        if (!map) return { pathGeometry: null, totalSamples: 0 };
 
         const getVal = (key) => {
             const feat = map.get(key);
@@ -84,62 +76,62 @@ export function SdcPathHighlight({ data, center, frameRef }) {
         
         if (points.length < 2) return { pathGeometry: null, totalSamples: 0 };
 
-        // Create a Curve
-        const curve = new THREE.CatmullRomCurve3(points);
-        
-        // Improved approach: Create a strip geometry.
-        
-        const width = 2.4; // Slightly wider than car
+        if (points.length < 2) return { pathGeometry: null, totalSamples: 0 };
+
+        // Optimization: Use raw points directly, similar to RoadGraph
+        const width = 2.4; 
         const vertices = [];
         const indices = [];
-        const uv = [];
-        
-        // Sampling curve
-        // We want enough samples to match roughly the frame count for smooth hiding?
-        // Total points ~ 91.
-        // Let's use more samples for smoothness, e.g. 200.
-        const samples = 200;
-        
-        for (let i = 0; i <= samples; i++) {
-            const t = i / samples;
-            const pt = curve.getPoint(t);
-            const tangent = curve.getTangent(t);
+        const uvs = [];
+
+        for (let i = 0; i < points.length; i++) {
+            const p = points[i];
             
-            // Assume Z up
-            const up = new THREE.Vector3(0, 0, 1);
-            const binormal = new THREE.Vector3().crossVectors(tangent, up).normalize();
+            // Calculate tangent
+            let tangent;
+            if (i === 0) {
+                tangent = new THREE.Vector3().subVectors(points[i + 1], p).normalize();
+            } else if (i === points.length - 1) {
+                tangent = new THREE.Vector3().subVectors(p, points[i - 1]).normalize();
+            } else {
+                tangent = new THREE.Vector3().subVectors(points[i + 1], points[i - 1]).normalize();
+            }
+
+            const normal = new THREE.Vector3(-tangent.y, tangent.x, 0).normalize();
             
-            // Offset
-            const left = pt.clone().addScaledVector(binormal, width / 2);
-            const right = pt.clone().addScaledVector(binormal, -width / 2);
-            
-            // Lift slightly above ground to avoid z-fighting
+            // Extrude left and right
+            const left = new THREE.Vector3().copy(p).addScaledVector(normal, width / 2);
+            const right = new THREE.Vector3().copy(p).addScaledVector(normal, -width / 2);
+
+            // Lift slightly
             left.z += 0.05;
             right.z += 0.05;
-            
+
             vertices.push(left.x, left.y, left.z);
             vertices.push(right.x, right.y, right.z);
             
-            uv.push(0, t);
-            uv.push(1, t); // Simple UV
-        }
-        
-        // Triangles
-        for (let i = 0; i < samples; i++) {
-            const base = i * 2;
-            indices.push(base, base + 2, base + 1);
-            indices.push(base + 1, base + 2, base + 3);
+            // Simple UVs
+            const t = i / (points.length - 1);
+            uvs.push(0, t);
+            uvs.push(1, t);
+
+            // Triangles
+            if (i < points.length - 1) {
+                const base = i * 2;
+                indices.push(base, base + 2, base + 1); // Counter-clockwise
+                indices.push(base + 1, base + 2, base + 3);
+            }
         }
         
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-        geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); // Optional
+        geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
         geo.setIndex(indices);
         geo.computeVertexNormals();
         
-        return { pathGeometry: geo, totalSamples: samples };
+        return { pathGeometry: geo, totalSamples: points.length };
 
-    }, [data, center]);
+    }, [map, center]);
 
     // Update Draw Range based on Frame
     // Use a ref to mesh to update geometry drawRange without excessive re-renders

@@ -5,34 +5,17 @@ import { useFrame } from '@react-three/fiber';
 const TEMP_OBJECT = new THREE.Object3D();
 const TEMP_COLOR = new THREE.Color();
 
-export function TrafficLights({ data, frameRef, center }) {
+export function TrafficLights({ map, frameRef, center }) {
     const trafficLights = useMemo(() => {
-        const featureMap = data?.context?.featureMap;
-        if (!featureMap) return [];
+        if (!map) return [];
         
-        let map;
-        if (Array.isArray(featureMap)) {
-            // Check if it's already an array of [k, v] or objects
-            // The output of pruneData might be object, but input parsing here needs to be robust
-            if (featureMap.length > 0 && Array.isArray(featureMap[0])) {
-                 map = new Map(featureMap);
-            } else if (featureMap.length > 0 && typeof featureMap[0] === 'object') {
-                 // Array of objects {key, value}
-                 map = new Map(featureMap.map(e => [e.key, e.value]));
-            } else {
-                 map = new Map(); // Empty or unknown
-            }
-        } else {
-             // It is an Object (from our pruned data)
-             map = new Map(Object.entries(featureMap || {}));
-        }
-
         const getVal = (key) => { 
             const feat = map.get(key);
             if (!feat) return [];
             return feat.floatList?.valueList || feat.int64List?.valueList || [];
         };
-        
+
+
         const ids = getVal('traffic_light_state/current/id');
         const count = ids.length;
         if (count === 0) return [];
@@ -137,7 +120,7 @@ export function TrafficLights({ data, frameRef, center }) {
         }
         
         return uniqueLights;
-    }, [data, center]);
+    }, [map, center]);
 
     const casingRef = useRef();
     const bulbRef = useRef();

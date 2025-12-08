@@ -124,24 +124,10 @@ const PED_GEOS = createPedestrianGeometries();
 const CYC_GEOS = createCyclistGeometries();
 
 
-export function Agents({ data, frameRef, center }) {
+export function Agents({ map, frameRef, center }) {
     const agents = useMemo(() => {
-        const featureMap = data?.context?.featureMap;
-        if (!featureMap) return [];
+        if (!map) return [];
         
-        let map;
-        if (Array.isArray(featureMap)) {
-            if (featureMap.length > 0 && Array.isArray(featureMap[0])) {
-                 map = new Map(featureMap);
-            } else if (featureMap.length > 0 && typeof featureMap[0] === 'object') {
-                 map = new Map(featureMap.map(e => [e.key, e.value]));
-            } else {
-                 map = new Map(); 
-            }
-        } else {
-             map = new Map(Object.entries(featureMap || {}));
-        }
-
         const getVal = (key) => { 
             const feat = map.get(key);
             if (!feat) return [];
@@ -272,7 +258,7 @@ export function Agents({ data, frameRef, center }) {
             });
         }
         return parsedAgents;
-    }, [data, center]);
+    }, [map, center]);
 
     // Split Agents
     const { sdc, peds, cyclists, vehicles, others } = useMemo(() => {

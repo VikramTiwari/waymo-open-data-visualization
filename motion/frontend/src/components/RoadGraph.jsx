@@ -1,84 +1,160 @@
 import React, { useMemo } from 'react';
-import { Line } from '@react-three/drei';
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Crosswalks } from './Crosswalks';
 
 // Standard lane width in meters
+// Standard lane width in meters
 const LANE_WIDTH = 3.8;
 
-// Function to generate ribbon geometry (CPU heavy, do once)
-function createLaneGeometry(points, width = LANE_WIDTH) {
+function createRibbonGeometry(points, width, isDashed = false, dashSize = 2, gapSize = 1.5) {
     if (points.length < 2) return null;
 
-    const curve = new THREE.CatmullRomCurve3(points);
-    // Adaptive sampling based on length could be better, but fixed multiplier is okay for now
-    const curvePoints = curve.getPoints(points.length * 5); 
+    // Phase 7 Optimization: Use raw points instead of expensive Spline
+    // Waymo data is already dense enough (approx 0.5m - 1m spacing).
+    
+    if (isDashed) {
+        const geometries = [];
+        let currentDist = 0;
+        
+        // Iterate segments of the polyline
+        for (let i = 0; i < points.length - 1; i++) {
+            const p1 = points[i];
+            const p2 = points[i+1];
+            const segLen = p1.distanceTo(p2);
+            
+            let distOnSeg = 0;
+            
+            while (distOnSeg < segLen) {
+                // If we are in a dash
+                const globalDist = currentDist;
+                // Dash cycle: [0..dashSize] is dash, [dashSize..dashSize+gapSize] is gap
+                const cyclePos = globalDist % (dashSize + gapSize);
+                
+                if (cyclePos < dashSize) {
+                    // We are in drawing mode
+                    const remainingDash = dashSize - cyclePos;
+                    const remainingSeg = segLen - distOnSeg;
+                    
+                    const drawLen = Math.min(remainingDash, remainingSeg);
+                    
+                    const startT = distOnSeg / segLen;
+                    const endT = (distOnSeg + drawLen) / segLen;
+                    
+                    const startP = new THREE.Vector3().lerpVectors(p1, p2, startT);
+                    const endP = new THREE.Vector3().lerpVectors(p1, p2, endT);
+                    
+                    // Create simple quad for this dash piece
+                    const dashGeo = createSegmentQuad(startP, endP, width);
+                    if (dashGeo) geometries.push(dashGeo);
+                    
+                    currentDist += drawLen;
+                    distOnSeg += drawLen;
+                } else {
+                    // We are in gap mode
+                    const remainingGap = (dashSize + gapSize) - cyclePos;
+                    const remainingSeg = segLen - distOnSeg;
+                    const skipLen = Math.min(remainingGap, remainingSeg);
+                    
+                    currentDist += skipLen;
+                    distOnSeg += skipLen;
+                }
+            }
+        }
+        
+        if (geometries.length === 0) return null;
+        return BufferGeometryUtils.mergeGeometries(geometries);
 
+    } else {
+        // Solid - direct strip
+        return createSingleStrip(points, width);
+    }
+}
+
+// Helper for a single quad (used in dashes)
+function createSegmentQuad(p1, p2, width) {
+    const tangent = new THREE.Vector3().subVectors(p2, p1).normalize();
+    const normal = new THREE.Vector3(-tangent.y, tangent.x, 0).normalize();
+    
+    const v = [];
+    // P1 Left/Right
+    v.push(
+        p1.x + normal.x * width/2, p1.y + normal.y * width/2, p1.z,
+        p1.x - normal.x * width/2, p1.y - normal.y * width/2, p1.z
+    );
+    // P2 Left/Right
+    v.push(
+        p2.x + normal.x * width/2, p2.y + normal.y * width/2, p2.z,
+        p2.x - normal.x * width/2, p2.y - normal.y * width/2, p2.z
+    );
+    
+    // Indices (0, 2, 1), (1, 2, 3)
+    // 0: TL, 1: TR, 2: BL, 3: BR? 
+    // Wait order above: L1, R1, L2, R2.
+    // 0: L1, 1: R1, 2: L2, 3: R2
+    
+    const indices = [0, 1, 2, 2, 1, 3];
+    const uvs = [0, 0, 1, 0, 0, 1, 1, 1];
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    geo.setIndex(indices);
+    geo.computeVertexNormals();
+    return geo;
+}
+
+function createSingleStrip(points, width) {
+    if (points.length < 2) return null;
+    
     const vertices = [];
     const indices = [];
     const uvs = [];
 
-    for (let i = 0; i < curvePoints.length; i++) {
-        const p = curvePoints[i];
+    for (let i = 0; i < points.length; i++) {
+        const p = points[i];
         
-        // Tangent
         let tangent;
         if (i === 0) {
-            tangent = new THREE.Vector3().subVectors(curvePoints[i + 1], p).normalize();
-        } else if (i === curvePoints.length - 1) {
-            tangent = new THREE.Vector3().subVectors(p, curvePoints[i - 1]).normalize();
+            tangent = new THREE.Vector3().subVectors(points[i + 1], p).normalize();
+        } else if (i === points.length - 1) {
+            tangent = new THREE.Vector3().subVectors(p, points[i - 1]).normalize();
         } else {
-            tangent = new THREE.Vector3().subVectors(curvePoints[i + 1], curvePoints[i - 1]).normalize();
+            tangent = new THREE.Vector3().subVectors(points[i + 1], points[i - 1]).normalize();
         }
 
-        // Normal (Width direction)
         const normal = new THREE.Vector3(-tangent.y, tangent.x, 0).normalize();
-
-        // Vertices (Flat ribbon, no thickness for merged mesh optimization - usually fine for top-down/remote view)
-        // If thickness is needed, we need 2x vertices and sides. 
-        // Original LaneRibbon had thickness. Let's keep thickness if possible, but 
-        // to save triangles for the huge merge, maybe flat is better? 
-        // The original code had `depth = 1.0`.
-        // Let's stick to flat for performance first. It looks 99% same from driving view.
-        // Actually, without thickness, z-fighting with ground might happen if ground exists. 
-        // But here Road IS the ground.
-        // Let's add slight poly offset or just flat.
-        // Let's do FLAT for now. It drastically reduces vertex count (4x less).
-        
         const left = new THREE.Vector3().copy(p).addScaledVector(normal, width / 2);
         const right = new THREE.Vector3().copy(p).addScaledVector(normal, -width / 2);
 
-        vertices.push(left.x, left.y, left.z, right.x, right.y, right.z);
+        vertices.push(left.x, left.y, left.z);
+        vertices.push(right.x, right.y, right.z);
         
-        const u = i / (curvePoints.length - 1);
-        uvs.push(0, u, 1, u);
+        // Simple linear UVs based on point index? 
+        // Or better, accumulated length.
+        // For simple color strip, UVs don't matter much.
+        uvs.push(0, 0); 
+        uvs.push(1, 0);
 
-        if (i < curvePoints.length - 1) {
+        if (i < points.length - 1) {
             const base = i * 2;
             indices.push(base, base + 1, base + 2);
             indices.push(base + 2, base + 1, base + 3);
         }
     }
-
+    
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
     geo.setIndex(indices);
     geo.computeVertexNormals();
-
     return geo;
 }
 
-function RoadGraphComponent({ data, center }) {
+
+function RoadGraphComponent({ map, center }) {
     const { lanes, markings, stopSigns, speedBumps, crosswalks } = useMemo(() => {
-        const featureMap = data?.context?.featureMap;
-        if (!featureMap) return { lanes: {}, markings: [], stopSigns: [], speedBumps: [], crosswalks: [] };
-        
-        // ... (Data extraction logic same as before)
-        let map;
-        if (Array.isArray(featureMap)) map = new Map(featureMap);
-        else map = new Map(Object.entries(featureMap || {}));
+        if (!map) return { lanes: {}, markings: [], stopSigns: [], speedBumps: [], crosswalks: [] };
         
         const getVal = (key) => {
             const feat = map.get(key);
@@ -119,19 +195,18 @@ function RoadGraphComponent({ data, center }) {
             }
         }
         
+        // Speed Bumps - Use raw points too if we want, but curves are okay for rare items.
+        // Actually, let's keep curve for speedbumps (rare) or remove? 
+        // Let's remove curve dependency completely for consistence.
+        // Pre-calculate speed bump geometries
         const speedBumpsList = Object.values(speedBumpsMap).map(points => {
             if (points.length < 2) return null;
-            const curve = new THREE.CatmullRomCurve3(points);
-            return { curve, points };
+            const geo = createSingleStrip(points, 0.4);
+            if (!geo) return null;
+            return { geometry: geo };
         }).filter(Boolean);
 
-        // Group Lanes by Type for Merging
-        // 1: Freeway, 2: Surface, 3: Bike
-        const laneGroups = {
-            1: [],
-            2: [],
-            3: []
-        };
+        const laneGroups = { 1: [], 2: [], 3: [] };
         const markingSegments = [];
         const crosswalkSegments = [];
 
@@ -153,13 +228,11 @@ function RoadGraphComponent({ data, center }) {
             crosswalks: crosswalkSegments
         };
 
-    }, [data, center]);
+    }, [map, center]);
 
-    // Compute Merged Geometries for Lanes
+    // --- MERGE LANES ---
     const mergedLanes = useMemo(() => {
         const results = {};
-        
-        // Process each lane type
         [1, 2, 3].forEach(type => {
             const pointsList = lanes[type];
             if (!pointsList || pointsList.length === 0) return;
@@ -168,12 +241,11 @@ function RoadGraphComponent({ data, center }) {
             const style = getLaneStyle(type);
 
             pointsList.forEach(points => {
-                 const geo = createLaneGeometry(points, style.width);
+                 const geo = createRibbonGeometry(points, style.width, false);
                  if (geo) geometries.push(geo);
             });
 
             if (geometries.length > 0) {
-                // Merge
                 const merged = BufferGeometryUtils.mergeGeometries(geometries, false);
                 results[type] = {
                     geometry: merged,
@@ -181,12 +253,46 @@ function RoadGraphComponent({ data, center }) {
                 };
             }
         });
-
         return results;
     }, [lanes]);
     
-    // Stop Sign Instance Mesh Logic
-    // We use a predefined geometry and verify counts
+    // --- MERGE MARKINGS ---
+    const mergedMarkings = useMemo(() => {
+        // Group by style key
+        const groups = {};
+        
+        // Define style key helper
+        const getStyleKey = (s) => `${s.color}-${s.width}-${s.dash}-${s.dashSize}-${s.gapSize}`;
+
+        markings.forEach(seg => {
+            const style = getMarkingStyle(seg.type);
+            const key = getStyleKey(style);
+            if (!groups[key]) groups[key] = { style, geometries: [] };
+            
+            // Convert pixel width to meters approximate
+            // 1px approx 0.1m, 2 -> 0.15m, 4 -> 0.3m, 6 -> 0.5m
+            let meterWidth = 0.1;
+            if (style.width >= 6) meterWidth = 0.5;
+            else if (style.width >= 4) meterWidth = 0.3;
+            else if (style.width >= 2) meterWidth = 0.15;
+            
+            const geo = createRibbonGeometry(seg.points, meterWidth, style.dash, style.dashSize, style.gapSize);
+            if (geo) groups[key].geometries.push(geo);
+        });
+        
+        const results = [];
+        Object.values(groups).forEach(g => {
+            if (g.geometries.length > 0) {
+                const merged = BufferGeometryUtils.mergeGeometries(g.geometries, false);
+                results.push({ geometry: merged, style: g.style });
+            }
+        });
+        
+        return results;
+    }, [markings]);
+
+
+    // --- STOP SIGNS ---
     const stopSignMesh = useMemo(() => {
         if (stopSigns.length === 0) return null;
         const geom = new THREE.CylinderGeometry(0.8, 0.8, 0.05, 8);
@@ -196,13 +302,6 @@ function RoadGraphComponent({ data, center }) {
         const dummy = new THREE.Object3D();
         stopSigns.forEach((sign, i) => {
             dummy.position.copy(sign.pos);
-            // dummy.rotation.set? signs face traffic? 
-            // Waymo data stop signs are points, no orientation usually. 
-            // Just flat on ground or on pole? 
-            // Original code: rotation [0,0,0], Cylinder flat on ground (y-up).
-            // Cylinder default is Y-axis up. So it looks like a puck on the ground? 
-            // If it's a pole sign, it should be rotated. 
-            // Current vis: Puck on ground (Octagon-ish).
             dummy.updateMatrix();
             mesh.setMatrixAt(i, dummy.matrix);
         });
@@ -222,41 +321,45 @@ function RoadGraphComponent({ data, center }) {
                         opacity={style.opacity} 
                         side={THREE.DoubleSide}
                         polygonOffset
-                        polygonOffsetFactor={1}
+                        polygonOffsetFactor={2}
                         roughness={0.8}
                         metalness={0.2}
                     />
                 </mesh>
             ))}
 
-            {/* Markings (Left as Line for now - tough to merge without custom shader or heavy work) */}
-            {markings.map((seg, idx) => {
-                const { color, width, opacity, dash, dashSize, gapSize } = getMarkingStyle(seg.type);
-                return (
-                    <Line 
-                        key={`mark-${idx}`} 
-                        points={seg.points} 
-                        color={color} 
-                        lineWidth={width} 
-                        transparent
-                        opacity={opacity}
-                        dashed={dash}
-                        dashSize={dashSize}
-                        gapSize={gapSize}
+            {/* Merged Markings */}
+            {mergedMarkings.map((group, idx) => (
+                 <mesh key={`mark-group-${idx}`} geometry={group.geometry}>
+                    <meshStandardMaterial 
+                        color={group.style.color} 
+                        transparent={true}
+                        opacity={group.style.opacity}
+                        side={THREE.DoubleSide}
+                        polygonOffset
+                        polygonOffsetFactor={1} // On top of lanes (factor 2)
+                        // Wait, polygonOffsetFactor: larger factor = pushed BACK.
+                        // We want Markings (1) ON TOP of Lanes (2).
+                        // So Lanes should be pushed back more? No.
+                        // Factor > 0 pushes away from camera.
+                        // We want Markings on Top (closer). So Markings factor < Lanes factor.
+                        // Standard: Ground (0), Markings (-1), Objects (-2).
+                        // Let's adjust.
+                        // Lanes: Factor 2 (Pushed back).
+                        // Markings: Factor 1 (Pushed back less -> on top of Lanes).
+                        // Correct.
+                        roughness={0.5}
+                        metalness={0.1}
                     />
-                );
-            })}
+                 </mesh>
+            ))}
 
-            {/* Crosswalks */}
             <Crosswalks crosswalks={crosswalks} />
 
-            {/* Stop Signs Instanced */}
             {stopSignMesh && <primitive object={stopSignMesh} />}
             
-            {/* Speed Bumps (Keep as tubes, few of them) */}
             {speedBumps.map((bump, idx) => (
-                <mesh key={`bump-${idx}`}>
-                    <tubeGeometry args={[bump.curve, 20, 0.3, 8, false]} />
+                <mesh key={`bump-${idx}`} geometry={bump.geometry}>
                     <meshStandardMaterial color="#FFFF00" roughness={0.6} metalness={0.1} />
                 </mesh>
             ))}
@@ -279,12 +382,19 @@ function getLaneStyle(type) {
 
 function getMarkingStyle(type) {
     switch(type) {
-        case 6: return { color: 'white', width: 2, opacity: 0.8, dash: true, dashSize: 2, gapSize: 1.5 };
-        case 7: case 8: return { color: 'white', width: 2, opacity: 1, dash: false };
-        case 9: case 10: case 13: return { color: '#F1C40F', width: 2, opacity: 1, dash: true, dashSize: 2, gapSize: 1.5 };
-        case 11: case 12: return { color: '#F1C40F', width: 2, opacity: 1, dash: false };
-        case 15: return { color: '#000000', width: 6, opacity: 1, dash: false };
-        case 16: return { color: '#000000', width: 4, opacity: 1, dash: false };
-        default: return { color: '#000000', width: 1, opacity: 0.3, dash: false };
+        case 6: // Dashed
+            return { color: 'white', width: 2, opacity: 0.8, dash: true, dashSize: 2, gapSize: 3 }; 
+        case 7: case 8: // Solid
+            return { color: 'white', width: 2, opacity: 1, dash: false };
+        case 9: case 10: case 13: // Yellow Dashed
+            return { color: '#F1C40F', width: 2, opacity: 1, dash: true, dashSize: 2, gapSize: 3 };
+        case 11: case 12: // Yellow Solid
+            return { color: '#F1C40F', width: 2, opacity: 1, dash: false };
+        case 15: // Stop line
+            return { color: '#ffffff', width: 6, opacity: 1, dash: false };
+        case 16: 
+            return { color: '#ffffff', width: 4, opacity: 1, dash: false };
+        default: 
+            return { color: '#ffffff', width: 1, opacity: 0.3, dash: false };
     }
 }

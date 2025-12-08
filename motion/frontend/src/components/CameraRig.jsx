@@ -27,17 +27,12 @@ const BASE_MODES = [
     { name: 'Top Down (Static)', type: 'static_top', height: 40 },
 ];
 
-export function CameraRig({ data, frameRef, center, variant, isAuto = true, onCameraChange }) {
+export function CameraRig({ map, frameRef, center, variant, isAuto = true, onCameraChange }) {
     const { camera } = useThree();
     
     // 1. Analyze Scenario (SDC + Pedestrians)
     const scenarioData = useMemo(() => {
-         const featureMap = data?.context?.featureMap;
-         if (!featureMap) return null;
-         
-         let map;
-         if (Array.isArray(featureMap)) map = new Map(featureMap);
-         else map = new Map(Object.entries(featureMap || {}));
+         if (!map) return null;
 
          const getVal = (key) => { 
              const feat = map.get(key);
@@ -80,7 +75,7 @@ export function CameraRig({ data, frameRef, center, variant, isAuto = true, onCa
              pedestrianIndices,
              sdcStart: [startX, startY]
          };
-    }, [data]); 
+    }, [map]); 
 
     // 2. Select Mode
     const activeMode = useMemo(() => {

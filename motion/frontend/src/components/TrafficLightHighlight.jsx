@@ -3,15 +3,10 @@ import { Billboard, Text } from '@react-three/drei';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 
-export function TrafficLightHighlight({ data, frameRef, center }) {
+export function TrafficLightHighlight({ map, frameRef, center }) {
     // 1. Get SDC Trajectory (Position + Speed)
     const sdcState = useMemo(() => {
-        const featureMap = data?.context?.featureMap;
-        if (!featureMap) return null;
-        
-        let map;
-        if (Array.isArray(featureMap)) map = new Map(featureMap);
-        else map = new Map(Object.entries(featureMap || {}));
+        if (!map) return null;
 
         const getVal = (key) => map.get(key)?.floatList?.valueList || map.get(key)?.int64List?.valueList || [];
 
@@ -63,16 +58,11 @@ export function TrafficLightHighlight({ data, frameRef, center }) {
             });
         }
         return traj;
-    }, [data, center]);
+    }, [map, center]);
 
     // 2. Get Traffic Lights Data
     const lightStates = useMemo(() => {
-        const featureMap = data?.context?.featureMap;
-        if (!featureMap) return [];
-        
-        let map;
-        if (Array.isArray(featureMap)) map = new Map(featureMap);
-        else map = new Map(Object.entries(featureMap || {}));
+        if (!map) return [];
         
         const getVal = (key) => map.get(key)?.floatList?.valueList || map.get(key)?.int64List?.valueList || [];
 
@@ -113,7 +103,7 @@ export function TrafficLightHighlight({ data, frameRef, center }) {
             });
         }
         return lights;
-    }, [data, center]);
+    }, [map, center]);
 
     // 3. Determine Display with Hysteresis
     // State to latch visibility
@@ -123,8 +113,15 @@ export function TrafficLightHighlight({ data, frameRef, center }) {
     // We use a ref to prevent stale closures in useFrame if we were using state directly, 
     // but here we just need to read data and set state if diff.
     
+    // State for throttling
+    const throttleRef = React.useRef(0);
+
     useFrame(() => {
         if (!frameRef || !sdcState) return;
+        
+        // Throttle logic: Run every 15 frames
+        throttleRef.current++;
+        if (throttleRef.current % 15 !== 0) return;
 
         const currentFrameIdx = Math.floor(frameRef.current);
         const sdcPos = sdcState[Math.min(Math.max(0, currentFrameIdx), sdcState.length - 1)];
@@ -161,17 +158,11 @@ export function TrafficLightHighlight({ data, frameRef, center }) {
             
             if (shouldHide) {
                  setBubbleState({ visible: false, causeId: null, color: null, pos: null });
-            } else {
-                // Update position if SDC moved (it shouldn't much if stopped, but drifting might occur)
-                // Just to be safe, update position slightly?
-                // Actually if sdcV < 0.1 it's mostly static.
-                // But let's check if we need to update 'pos' in state for re-render?
-                // Or just assume it's fine.
             }
             
         } else {
             // Scan for Red lights
-            let closestDist = Infinity;
+            let closestDistSq = Infinity;
             let foundLight = null;
 
             for (const light of lightStates) {
@@ -182,10 +173,12 @@ export function TrafficLightHighlight({ data, frameRef, center }) {
                 if (RED_STATES.includes(state)) {
                     const dx = light.pos.x - sdcPos.x;
                     const dy = light.pos.y - sdcPos.y;
-                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    // Optimization: Use squared distance to avoid Sqrt
+                    const distSq = dx*dx + dy*dy;
                     
-                    if (dist < 40 && dist < closestDist) {
-                        closestDist = dist;
+                    // 40m radius -> 1600
+                    if (distSq < 1600 && distSq < closestDistSq) {
+                        closestDistSq = distSq;
                         foundLight = light;
                     }
                 }

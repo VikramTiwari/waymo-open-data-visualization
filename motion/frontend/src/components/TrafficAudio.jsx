@@ -133,12 +133,17 @@ export function TrafficAudio({ sdcSpeeds, frameRef, isPlaying }) {
      }
   }, [isPlaying]);
 
+  // Throttle Ref
+  const throttleRef = useRef(0);
+
   // Update Loop
   useFrame(() => {
     if (!audioContextRef.current || !hasStartedRef.current) return;
     if (!sdcSpeeds || !frameRef) return;
     
-    // Ensure we are running if supposed to be
+    // Throttle: Update audio every 10 frames
+    throttleRef.current++;
+    if (throttleRef.current % 10 !== 0) return;
     if (isPlaying && audioContextRef.current.state === 'suspended') {
          // audioContextRef.current.resume(); // Browsers might block this in loop, better to rely on effect/interaction
     }
