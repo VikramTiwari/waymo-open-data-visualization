@@ -173,9 +173,12 @@ app.get('/next', async (req, res) => {
         
         console.log(`Streaming Scenario ${displayIndex + 1}/${currentTotalScenarios} (Session Rem: ${sessionRemaining})`);
 
+        // Prune Data before sending
+        const prunedRecord = pruneData(result.value);
+
         res.json({ 
             done: false, 
-            record: result.value,
+            record: prunedRecord,
             fileInfo: {
                 index: currentFileIndex + 1,
                 total: files.length,
@@ -198,6 +201,90 @@ app.get('/next', async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+
+// Whitelist of features we actually use in Frontend
+const FEATURE_WHITELIST = new Set([
+    'scenario/id',
+    // RoadGraph
+    'roadgraph_samples/xyz', 'roadgraph_samples/id', 'roadgraph_samples/type', 'roadgraph_samples/valid', 'roadgraph_samples/dir',
+    // Traffic Lights
+    'traffic_light_state/current/id', 'traffic_light_state/current/state', 'traffic_light_state/current/x', 'traffic_light_state/current/y', 'traffic_light_state/current/z', 'traffic_light_state/current/valid',
+    'traffic_light_state/past/state', 'traffic_light_state/past/x', 'traffic_light_state/past/y', 'traffic_light_state/past/z', 'traffic_light_state/past/valid',
+    'traffic_light_state/future/state', 'traffic_light_state/future/x', 'traffic_light_state/future/y', 'traffic_light_state/future/z', 'traffic_light_state/future/valid',
+    // Agents / State
+    'state/id', 'state/type', 'state/is_sdc',
+    'state/current/x', 'state/current/y', 'state/current/z', 'state/current/bbox_yaw', 'state/current/velocity_x', 'state/current/velocity_y',
+    'state/current/length', 'state/current/width', 'state/current/height', 'state/current/valid',
+    'state/past/x', 'state/past/y', 'state/past/z', 'state/past/bbox_yaw', 'state/past/velocity_x', 'state/past/velocity_y', 'state/past/valid',
+    'state/future/x', 'state/future/y', 'state/future/z', 'state/future/bbox_yaw', 'state/future/velocity_x', 'state/future/velocity_y', 'state/future/valid',
+    // Path Samples (if used) - currently referenced in PathSamples.jsx
+    'path_samples/xyz', 'path_samples/id', 'path_samples/valid'
+]);
+
+function pruneData(record) {
+    if (!record || !record.context || !record.context.featureMap) return record;
+
+    const originalMap = record.context.featureMap;
+    // We want to return an Object to the frontend (JSON).
+    // The frontend code `new Map(Object.entries(featureMap || {}))` implies it expects an Object.
+    // If we send back an Array, `Object.entries(Array)` gives indices, which breaks logic.
+    // So we MUST return a plain Object { key: value }.
+
+    const prunedMap = {};
+    let foundAny = false;
+
+    // Detect Input Type and Iterate
+    if (Array.isArray(originalMap)) {
+        originalMap.forEach(entry => {
+            let k, v;
+            if (Array.isArray(entry)) {
+                 k = entry[0]; v = entry[1];
+            } else if (entry && typeof entry === 'object') {
+                 // MapEntry usually has 'key' and 'value' fields
+                 k = entry.key;
+                 v = entry.value;
+            }
+            
+            if (k && FEATURE_WHITELIST.has(k)) {
+                prunedMap[k] = v;
+                foundAny = true;
+            }
+        });
+    } else if (originalMap instanceof Map) {
+        for (let [k, v] of originalMap) {
+            if (FEATURE_WHITELIST.has(k)) {
+                prunedMap[k] = v;
+                foundAny = true;
+            }
+        }
+    } else {
+        // Plain Object
+        const keys = Object.keys(originalMap);
+        keys.forEach(k => {
+             if (FEATURE_WHITELIST.has(k)) {
+                 prunedMap[k] = originalMap[k];
+                 foundAny = true;
+             }
+        });
+    }
+
+    if (!foundAny) {
+        // Only warn if map was not empty but we found nothing
+        const len = Array.isArray(originalMap) ? originalMap.length : (originalMap instanceof Map ? originalMap.size : Object.keys(originalMap).length);
+        if (len > 0) {
+             console.warn('Prune: WARNING - No keys matched whitelist! (Input len: ' + len + ')');
+        }
+    }
+
+    return {
+        ...record,
+        context: {
+            ...record.context,
+            featureMap: prunedMap
+        }
+    };
+}
+
 
 // Cleanup on exit
 process.on('SIGINT', async () => {

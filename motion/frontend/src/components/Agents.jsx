@@ -5,14 +5,11 @@ import { WaymoCar } from './WaymoCar';
 import { PedestrianAsset } from './PedestrianAsset';
 import { CyclistAsset } from './CyclistAsset'; 
 
+const TEMP_OBJECT = new THREE.Object3D();
+const TEMP_COLOR = new THREE.Color();
+
 export function Agents({ data, frameRef, center }) {
     // We compute the full trajectory for every agent ONCE when data changes.
-    // The previous implementation did this based on center.
-    // We will stick to that.
-    
-    // Note: We are no longer receiving 'frame' as prop to trigger re-renders.
-    // 'frameRef' is a MutableRefObject<number>.
-    
     const agents = useMemo(() => {
         const featureMap = data?.context?.featureMap;
         if (!featureMap) return [];
@@ -82,8 +79,6 @@ export function Agents({ data, frameRef, center }) {
             }
         }
         // ------------------------------------------
-        
-
 
         const parsedAgents = [];
         for (let i = 0; i < count; i++) {
@@ -116,50 +111,36 @@ export function Agents({ data, frameRef, center }) {
                 pushStep(futureX[idx], futureY[idx], futureZ[idx], futureYaw[idx], futureVx[idx], futureVy[idx]);
             }
             
-            // Calculate Acceleration (Simple backward diff or central diff)
-            // accel = deltaV / deltaT (deltaT is 0.1s)
+            // Calculate Acceleration
             for (let t = 0; t < trajectory.length - 1; t++) {
                 const step = trajectory[t];
                 const next = trajectory[t + 1];
-                
-                // Calculate acceleration based on speed difference (scalar acceleration)
-                // Speed = sqrt(vx*vx + vy*vy)
-                // Accel = (Speed_next - Speed_curr) / 0.1
-                
                 const speedCurr = Math.sqrt(step.vx*step.vx + step.vy*step.vy);
                 const speedNext = Math.sqrt(next.vx*next.vx + next.vy*next.vy);
                 const accel = (speedNext - speedCurr) / 0.1;
                 step.accel = accel;
             }
             // Last point accel
-            // Check if Static (Max speed < 0.5 m/s)
             let maxSpeed = 0;
             for(const step of trajectory) {
                 const s = Math.sqrt(step.vx*step.vx + step.vy*step.vy);
                 if (s > maxSpeed) maxSpeed = s;
             }
-            // Refined Parked Logic: Static AND Far from Lane Center
+            
+            // Refined Parked Logic
             let isParked = false;
-            if (maxSpeed < 0.5) {
-                // Check distance to nearest lane point
-                // Using start position
+            // Only check for vehicles (Type 1)
+            if (type[i] === 1 && maxSpeed < 0.5) {
                 const startPos = trajectory[0];
                 let minDist = Infinity;
-                
-                // Sample optimization: check every 5th lane point? Lane points are dense.
-                // Or just brute force, standard scene has ~20-30k points? might be slow.
-                // Lane centers are sparse? usually dense polyline.
-                // Let's increment by 5 to save perf.
                 for (let k = 0; k < lanePoints.length; k += 5) {
                     const lp = lanePoints[k];
                     const dx = lp.x - startPos.x;
                     const dy = lp.y - startPos.y;
-                    const d = dx*dx + dy*dy; // Squared
+                    const d = dx*dx + dy*dy;
                     if (d < minDist) minDist = d;
-                    if (d < 4.0) break; // If < 2m (4m squared), definitely on road.
+                    if (d < 4.0) break; 
                 }
-                
-                // Threshold: 2 meters?
                 if (minDist > 4.0) { // > 2m distance
                     isParked = true;
                 }
@@ -179,11 +160,104 @@ export function Agents({ data, frameRef, center }) {
         return parsedAgents;
     }, [data, center]);
 
+    // Split Agents into Special (React Components) and Instanced (Generic Vehicles)
+    const { specialAgents, instancedVehicles } = useMemo(() => {
+        const special = [];
+        const instanced = [];
+        
+        agents.forEach(agent => {
+            // SDC, Pedestrians (2), Cyclists (4) are special
+            if (agent.isSdc || agent.type === 2 || agent.type === 4) {
+                special.push(agent);
+            } else {
+                // Generic Vehicle (1) or Signs (3) or Unknown
+                // We'll instance Type 1 and defaults.
+                instanced.push(agent);
+            }
+        });
+        
+        return { specialAgents: special, instancedVehicles: instanced };
+    }, [agents]);
+
+    // Ref for InstancedMesh
+    const meshRef = useRef();
+
+    useFrame(() => {
+        if (!frameRef) return;
+        const currentFrame = frameRef.current;
+        const count = instancedVehicles.length;
+
+        if (count === 0 || !meshRef.current) return;
+
+        instancedVehicles.forEach((agent, i) => {
+            const traj = agent.trajectory;
+            const idx1 = Math.floor(currentFrame);
+            const idx2 = Math.min(idx1 + 1, traj.length - 1);
+            const alpha = currentFrame - idx1;
+
+            const step1 = traj[idx1];
+            const step2 = traj[idx2];
+            
+            if (!step1) {
+                // Invisible
+                TEMP_OBJECT.scale.set(0, 0, 0);
+                TEMP_OBJECT.updateMatrix();
+                meshRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
+                return;
+            }
+
+            let x, y, z, yaw;
+
+            if (step2 && step1 !== step2) {
+                 x = THREE.MathUtils.lerp(step1.x, step2.x, alpha);
+                 y = THREE.MathUtils.lerp(step1.y, step2.y, alpha);
+                 z = THREE.MathUtils.lerp(step1.z, step2.z, alpha);
+                 
+                 let dYaw = step2.yaw - step1.yaw;
+                 while (dYaw > Math.PI) dYaw -= 2 * Math.PI;
+                 while (dYaw < -Math.PI) dYaw += 2 * Math.PI;
+                 yaw = step1.yaw + dYaw * alpha;
+            } else {
+                 x = step1.x; y = step1.y; z = step1.z;
+                 yaw = step1.yaw; 
+            }
+
+            TEMP_OBJECT.position.set(x, y, z);
+            TEMP_OBJECT.rotation.set(0, 0, yaw);
+            // Dimensions for Box
+            TEMP_OBJECT.scale.set(agent.dims[0], agent.dims[1], agent.dims[2]);
+            TEMP_OBJECT.updateMatrix();
+            meshRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
+            
+            // Color can happen once? Or dynamic if parked state changes? 
+            // Parked State is constant per agent in our logic.
+            // Using logic from before:
+            const colorHex = agent.isParked ? "#abcbfd" : getTypeColor(agent.type);
+            TEMP_COLOR.set(colorHex);
+            meshRef.current.setColorAt(i, TEMP_COLOR);
+        });
+        
+        meshRef.current.instanceMatrix.needsUpdate = true;
+        if (meshRef.current.instanceColor) meshRef.current.instanceColor.needsUpdate = true;
+    });
+
     return (
         <group>
-            {agents.map((agent, idx) => (
+            {/* Special Agents (SDC, Peds, Cyclists) */}
+            {specialAgents.map((agent, idx) => (
                 <AgentItem key={`${agent.id}-${idx}`} agent={agent} frameRef={frameRef} />
             ))}
+            
+            {/* Instanced Generic Vehicles */}
+            {instancedVehicles.length > 0 && (
+                <instancedMesh 
+                    ref={meshRef} 
+                    args={[null, null, instancedVehicles.length]}
+                >
+                    <boxGeometry args={[1, 1, 1]} />
+                    <meshStandardMaterial />
+                </instancedMesh>
+            )}
         </group>
     );
 }
@@ -199,7 +273,6 @@ function AgentItem({ agent, frameRef }) {
         const currentFrame = frameRef.current;
         const traj = agent.trajectory;
         
-        // Find indices
         const idx1 = Math.floor(currentFrame);
         const idx2 = Math.min(idx1 + 1, traj.length - 1);
         const alpha = currentFrame - idx1;
@@ -208,26 +281,18 @@ function AgentItem({ agent, frameRef }) {
         const step2 = traj[idx2];
         
         if (!step1) {
-            // Out of bounds or invalid
             if (groupRef.current) groupRef.current.visible = false;
             return;
         }
         
         if (groupRef.current) groupRef.current.visible = true;
 
-        // Linear Interpolation
-        // If step2 exists, lerp. Else stick to step1.
         let x, y, z, yaw, vx, vy, accel;
         
         if (step2 && step1 !== step2) {
              x = THREE.MathUtils.lerp(step1.x, step2.x, alpha);
              y = THREE.MathUtils.lerp(step1.y, step2.y, alpha);
              z = THREE.MathUtils.lerp(step1.z, step2.z, alpha);
-             // Yaw interpolation requires shortest path normalization
-             // Standard lerp might spin around 360->0 or -PI->PI.
-             // We can just use step1 yaw if delta is huge, or simple lerp if reasonably minimal.
-             // Waymo yaw usually smooth. 
-             // Let's implement shortest path lerp for angle:
              let dYaw = step2.yaw - step1.yaw;
              while (dYaw > Math.PI) dYaw -= 2 * Math.PI;
              while (dYaw < -Math.PI) dYaw += 2 * Math.PI;
@@ -235,8 +300,6 @@ function AgentItem({ agent, frameRef }) {
              
              vx = THREE.MathUtils.lerp(step1.vx, step2.vx, alpha);
              vy = THREE.MathUtils.lerp(step1.vy, step2.vy, alpha);
-             
-             // Interpolate accel
              accel = THREE.MathUtils.lerp(step1.accel || 0, step2.accel || 0, alpha);
         } else {
              x = step1.x; y = step1.y; z = step1.z;
@@ -252,11 +315,6 @@ function AgentItem({ agent, frameRef }) {
             bodyRef.current.rotation.set(0, 0, yaw);
         }
 
-        // Update Braking State (Threshold: -1.0 m/s^2)
-        // Only update state if meaningful change to avoid react re-render thrashing?
-        // Actually modifying state inside useFrame triggers re-render of component.
-        // We generally avoid setState in useFrame unless throttled or necessary.
-        // But for visual prop `isBraking`, we need it.
         const brakingNow = accel < -1.0;
         if (brakingNow !== isBraking) {
             setIsBraking(brakingNow);
@@ -268,23 +326,12 @@ function AgentItem({ agent, frameRef }) {
                 arrowRef.current.visible = true;
                 const arrowYaw = Math.atan2(vy, vx);
                 arrowRef.current.rotation.set(0, 0, arrowYaw);
-                // Scale arrow length based on speed. 
-                // Base length 1 corresponds to 1 m/s (or adjusted for visibility).
-                // Clamp max length to avoid huge arrows? Or let them be huge?
-                // Visual preference: maybe speed * 0.5?
-                // Let's stick to 1:1 for physical meaning, or slightly reduced.
                 arrowRef.current.scale.set(Math.max(speed * 0.5, 1), 1, 1);
             } else {
                 arrowRef.current.visible = false;
             }
         }
     });
-    
-    // We recreate the Arrow JSX with refs to control it?
-    // The previous implementation had dynamic geometry args `args={[speed, ...]}`.
-    // Changing args usually triggers geometry reconstruction.
-    // Dynamic arrow length is better done via scaling a unit cylinder/box.
-    // Let's assume a unit vector arrow and scale X.
     
     return (
         <group ref={groupRef}>
@@ -296,31 +343,25 @@ function AgentItem({ agent, frameRef }) {
                 ) : agent.type === 4 ? (
                         <CyclistAsset />
                 ) : (
+                    // Fallback for special types if they slip through logic
                     <mesh> 
                         <boxGeometry args={[agent.dims[0], agent.dims[1], agent.dims[2]]} />
-                        <meshStandardMaterial color={agent.isParked && agent.type === 1 ? "#abcbfd" : getTypeColor(agent.type)} />
+                        <meshStandardMaterial color={getTypeColor(agent.type)} />
                     </mesh>
                 )}
              </group>
              
-             {/* Arrow for Velocity Vector */}
              <group ref={arrowRef} visible={false}>
-                 {/* Arrow Shaft (Unit length 1, starts at 0, ends at 1) 
-                     We use a Group to handle rotation/scale easily.
-                     Content: A box or cylinder representing the vector.
-                 */}
                  <mesh position={[0.5, 0, 0]}>
                      <boxGeometry args={[1, 0.1, 0.1]} />
                      <meshBasicMaterial color={agent.isSdc ? "#00FFFF" : "#FFEB3B"} />
                  </mesh>
-                 {/* Arrow Head */}
                  <mesh position={[1, 0, 0]} rotation={[0, 0, -Math.PI / 2]}>
                      <coneGeometry args={[0.2, 0.5, 8]} />
                      <meshBasicMaterial color={agent.isSdc ? "#00FFFF" : "#FFEB3B"} />
                  </mesh>
              </group>
 
-             {/* SDC Highlight: A Pulse/Ring under the car */}
              {agent.isSdc && (
                  <mesh position={[0, 0, -0.7]} rotation={[0, 0, 0]}>
                     <ringGeometry args={[2.0, 2.5, 32]} />
@@ -335,7 +376,7 @@ function getTypeColor(type) {
   switch(type) {
     case 1: return '#4285F4'; 
     case 2: return '#FF9800'; 
-    case 3: return '#FBBC04'; // Sign
+    case 3: return '#FBBC04';
     case 4: return '#34A853'; 
     default: return 'gray';
   }
