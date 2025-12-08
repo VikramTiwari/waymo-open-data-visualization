@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const compression = require('compression');
 const { TFRecordsStreamReader } = require('./read_data_stream');
 
 const fs = require('fs');
@@ -8,6 +9,7 @@ const app = express();
 const PORT = 5555;
 
 app.use(cors());
+app.use(compression());
 
 // Internal state
 let files = [];
