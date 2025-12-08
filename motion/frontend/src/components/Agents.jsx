@@ -216,6 +216,12 @@ function AgentItem({ agent, frameRef }) {
                 arrowRef.current.visible = true;
                 const arrowYaw = Math.atan2(vy, vx);
                 arrowRef.current.rotation.set(0, 0, arrowYaw);
+                // Scale arrow length based on speed. 
+                // Base length 1 corresponds to 1 m/s (or adjusted for visibility).
+                // Clamp max length to avoid huge arrows? Or let them be huge?
+                // Visual preference: maybe speed * 0.5?
+                // Let's stick to 1:1 for physical meaning, or slightly reduced.
+                arrowRef.current.scale.set(Math.max(speed * 0.5, 1), 1, 1);
             } else {
                 arrowRef.current.visible = false;
             }
@@ -245,10 +251,30 @@ function AgentItem({ agent, frameRef }) {
                 )}
              </group>
              
-             {/* Simple static arrow placeholder or remove for now?
-                 The user didn't ask for arrow updates, just jitter fix.
-                 I'll leave the arrow out or simple.
-              */}
+             {/* Arrow for Velocity Vector */}
+             <group ref={arrowRef} visible={false}>
+                 {/* Arrow Shaft (Unit length 1, starts at 0, ends at 1) 
+                     We use a Group to handle rotation/scale easily.
+                     Content: A box or cylinder representing the vector.
+                 */}
+                 <mesh position={[0.5, 0, 0]}>
+                     <boxGeometry args={[1, 0.1, 0.1]} />
+                     <meshBasicMaterial color={agent.isSdc ? "#00FFFF" : "#FFEB3B"} />
+                 </mesh>
+                 {/* Arrow Head */}
+                 <mesh position={[1, 0, 0]} rotation={[0, 0, -Math.PI / 2]}>
+                     <coneGeometry args={[0.2, 0.5, 8]} />
+                     <meshBasicMaterial color={agent.isSdc ? "#00FFFF" : "#FFEB3B"} />
+                 </mesh>
+             </group>
+
+             {/* SDC Highlight: A Pulse/Ring under the car */}
+             {agent.isSdc && (
+                 <mesh position={[0, 0, -0.7]} rotation={[0, 0, 0]}>
+                    <ringGeometry args={[2.0, 2.5, 32]} />
+                    <meshBasicMaterial color="#00FFFF" transparent opacity={0.3} side={THREE.DoubleSide} />
+                 </mesh>
+             )}
         </group>
     );
 }
