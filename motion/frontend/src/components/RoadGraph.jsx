@@ -3,7 +3,7 @@ import { Line } from '@react-three/drei';
 import * as THREE from 'three';
 
 export function RoadGraph({ data, center }) {
-    const { lines, stopSigns, speedBumps } = useMemo(() => {
+    const { lines, stopSigns, speedBumps, speedBumpTexture } = useMemo(() => {
         const featureMap = data?.context?.featureMap;
         if (!featureMap) return { lines: [], stopSigns: [], speedBumps: [] };
         
@@ -65,10 +65,39 @@ export function RoadGraph({ data, center }) {
             return { curve, points };
         }).filter(Boolean);
 
+        // Create Speed Bump Texture
+        const canvas = document.createElement('canvas');
+        canvas.width = 64;
+        canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+        
+        // Yellow background
+        ctx.fillStyle = '#F1C40F';
+        ctx.fillRect(0, 0, 64, 64);
+        
+        // Black stripes
+        ctx.fillStyle = '#000000';
+        ctx.beginPath();
+        // Draw diagonal stripes
+        for (let i = -64; i < 128; i += 16) {
+            ctx.moveTo(i, 0);
+            ctx.lineTo(i + 16, 64);
+            ctx.lineTo(i + 8, 64);
+            ctx.lineTo(i - 8, 0);
+        }
+        ctx.fill();
+        
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.wrapT = THREE.RepeatWrapping;
+        // Adjust repeat based on length if possible, or just a fixed repeat
+        texture.repeat.set(1, 1); 
+
         return { 
             lines: Object.values(segments), 
             stopSigns: stopSignsList, 
-            speedBumps: speedBumpsList 
+            speedBumps: speedBumpsList,
+            speedBumpTexture: texture
         };
 
     }, [data, center]);
@@ -95,7 +124,7 @@ export function RoadGraph({ data, center }) {
 
             {/* Distinct Stop Signs (Flat Octagons) */}
             {stopSigns.map((sign, idx) => (
-                <mesh key={sign.id + idx} position={sign.pos} rotation={[0, 0, 0]}> 
+                <mesh key={`${sign.id}-${idx}`} position={sign.pos} rotation={[0, 0, 0]}> 
                     {/* Note: In Z-up, flat on ground is XY plane. Cylinder default is Y-axis alignment.
                         So Cylinder stands UP (along Z) if we just place it?
                         Default Cylinder aligned to Y.
@@ -109,13 +138,25 @@ export function RoadGraph({ data, center }) {
                 </mesh>
             ))}
             
-            {/* Speed Bumps (Volumetric Tubes) */}
-            {speedBumps.map((bump, idx) => (
-                <mesh key={idx}>
-                    <tubeGeometry args={[bump.curve, 20, 0.3, 8, false]} />
-                    <meshStandardMaterial color="#FF9800" />
-                </mesh>
-            ))}
+            {/* Speed Bumps (Volumetric Tubes with Stripes) */}
+            {speedBumps.map((bump, idx) => {
+                 // Create texture if it doesn't exist
+                 // We can't easily create a texture inside the map effectively without hooks or global
+                 // Better to move texture creation to useMemo above.
+                 // But for now, let's use a procedural shader or just a texture created once.
+                 
+                 // Actually, let's create the texture in the useMemo above to avoid recreating it every render
+                 return (
+                    <mesh key={idx}>
+                        <tubeGeometry args={[bump.curve, 20, 0.3, 8, false]} />
+                        <meshStandardMaterial 
+                            map={speedBumpTexture}
+                            roughness={0.8}
+                            metalness={0.1}
+                        />
+                    </mesh>
+                );
+            })}
         </group>
     );
 }

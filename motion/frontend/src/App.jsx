@@ -3,7 +3,7 @@ import { Scene } from './Scene';
 import { useRecordBuffer } from './hooks/useRecordBuffer';
 
 function App() {
-  const { data, fileInfo, scenarioInfo, isConnected, playNext, bufferSize } = useRecordBuffer('http://localhost:3000');
+  const { data, fileInfo, scenarioInfo, isConnected, playNext, bufferSize } = useRecordBuffer('http://localhost:5555');
 
   // No auto-play of records. User advances manually.
   

@@ -102,7 +102,7 @@ export function TrafficLights({ data, frame, center }) {
 
     return (
         <group>
-            {trafficLights.map(light => {
+            {trafficLights.map((light, idx) => {
                 const step = light.trajectory[frame];
                 // Fallback to last known position if frame out of partial bounds? 
                 // However, our scene generally syncs frame 0..90.
@@ -116,7 +116,7 @@ export function TrafficLights({ data, frame, center }) {
                 // Traffic lights are usually up high. Z might already reflect that.
                 
                 return (
-                    <group key={light.id} position={[step.x, step.y, step.z]}>
+                    <group key={`${light.id}-${idx}`} position={[step.x, step.y, step.z]}>
                          {/* Casing */}
                         <mesh position={[0, 0, 0]}>
                             <boxGeometry args={[0.5, 0.5, 1.2]} />

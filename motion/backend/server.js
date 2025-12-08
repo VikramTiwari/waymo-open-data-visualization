@@ -5,7 +5,7 @@ const { TFRecordsStreamReader } = require('./read_data_stream');
 
 const fs = require('fs');
 const app = express();
-const PORT = 3000;
+const PORT = 5555;
 
 app.use(cors());
 

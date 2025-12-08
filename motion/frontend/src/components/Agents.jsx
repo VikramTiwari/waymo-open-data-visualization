@@ -111,8 +111,8 @@ export function Agents({ data, frameRef, center }) {
 
     return (
         <group>
-            {agents.map(agent => (
-                <AgentItem key={agent.id} agent={agent} frameRef={frameRef} />
+            {agents.map((agent, idx) => (
+                <AgentItem key={`${agent.id}-${idx}`} agent={agent} frameRef={frameRef} />
             ))}
         </group>
     );
