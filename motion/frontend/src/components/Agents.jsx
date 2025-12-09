@@ -41,6 +41,11 @@ function createPedestrianGeometries() {
     head.translate(0, 0, legHeight + torsoHeight + headSize/2);
     const skinGeo = head;
 
+    // Fix crabwalking: Rotate -90 deg to align shoulders with Y (Movement is X)
+    pantsGeo.rotateZ(-Math.PI / 2);
+    shirtGeo.rotateZ(-Math.PI / 2);
+    skinGeo.rotateZ(-Math.PI / 2);
+
     return { pantsGeo, shirtGeo, skinGeo };
 }
 

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
@@ -8,7 +9,6 @@ import { TrafficLights } from './components/TrafficLights';
 import { PathSamples } from './components/PathSamples';
 import { SdcPathHighlight } from './components/SdcPathHighlight';
 import { TrafficLightHighlight } from './components/TrafficLightHighlight';
-import { TrafficAudio } from './components/TrafficAudio';
 
 export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
   // Removed frame state to prevent full scene re-renders
@@ -578,6 +578,9 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
      }
   }, [data, sdcSpeeds]);
 
+  const isAudioEnabled = new URLSearchParams(window.location.search).get('audio') !== 'false';
+
+
   return (
     <div style={{ width: '100%', height: '100vh', position: 'relative', background: 'black' }}>
         <Canvas camera={{ position: [0, -20, 20], fov: 45, up: [0, 0, 1] }}>
@@ -592,12 +595,7 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
             {parsedPathSamples && <PathSamples vertices={parsedPathSamples} />}
             {parsedMap && <Agents agents={parsedAgents} trafficLights={parsedTrafficLights} frameRef={frameRef} />} 
             {parsedTrafficLights && <TrafficLights key="traffic-lights-spheres" trafficLights={parsedTrafficLights} frameRef={frameRef} />}
-            {(() => {
-                 // Optimization: Params are checked inside render.
-                 // It's fast enough, but cleaner to extract if we want perfectly clean render.
-                 // However, for this block IIFE, it's fine.
-                 return (new URLSearchParams(window.location.search).get('audio') !== 'false') && parsedMap && <TrafficAudio sdcSpeeds={sdcSpeeds} frameRef={frameRef} isPlaying={isPlaying} />;
-            })()}
+            {isAudioEnabled && parsedMap && null /* Audio Removed */}
             {(() => {
                  const isAuto = new URLSearchParams(window.location.search).get('autoCamera') !== 'false';
                  return parsedMap && <CameraRig map={parsedMap} frameRef={frameRef} center={center} variant={variant} isAuto={isAuto} onCameraChange={setCameraName} />;
