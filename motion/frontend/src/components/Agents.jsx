@@ -144,6 +144,41 @@ function createArrowGeometry() {
 }
 const ARROW_GEO = createArrowGeometry();
 
+const wireframeShaderHandler = (shader) => {
+    shader.vertexShader = `
+      varying vec3 vPos;
+      ${shader.vertexShader}
+    `.replace(
+      '#include <begin_vertex>',
+      `
+      #include <begin_vertex>
+      vPos = position;
+      `
+    );
+    shader.fragmentShader = `
+      varying vec3 vPos;
+      ${shader.fragmentShader}
+    `.replace(
+      '#include <color_fragment>',
+      `
+      #include <color_fragment>
+      float h = vPos.y + 0.5; // Map -0.5..0.5 to 0..1
+      if (h > 0.97) {
+        diffuseColor.a = 0.0;
+      } else {
+        // Gradient: Solid at bottom (0), fading rapidly to transparency at top
+        // Quadratic falloff for ghostlier look
+        float alphaFade = 1.0 - smoothstep(0.0, 0.95, h);
+        alphaFade = pow(alphaFade, 1.5); 
+        diffuseColor.a *= alphaFade;
+        
+        // Color: Mix with white as we go up, but keep it subtle
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0), h * 0.5);
+      }
+      `
+    );
+};
+
 
 export function Agents({ agents, trafficLights, frameRef }) {
 
@@ -176,6 +211,7 @@ export function Agents({ agents, trafficLights, frameRef }) {
     // --- INSTANCING REFS ---
     const vehicleMeshRef = useRef();
     const vehicleArrowRef = useRef(); // New Ref for Arrows
+    const vehicleWireframeRef = useRef(); // Wireframe Ref
     
     // Peds Refs
     const pedPantsRef = useRef();
@@ -187,6 +223,7 @@ export function Agents({ agents, trafficLights, frameRef }) {
     const cycWheelRef = useRef();
     const cycClothesRef = useRef();
     const cycSkinRef = useRef();
+    const cycWireframeRef = useRef(); // Wireframe Ref
 
     // --- UPDATE LOOP ---
     useFrame(() => {
@@ -255,6 +292,7 @@ export function Agents({ agents, trafficLights, frameRef }) {
                      TEMP_OBJECT.updateMatrix();
                      vehicleMeshRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
                      if (vehicleArrowRef.current) vehicleArrowRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
+                     if (vehicleWireframeRef.current) vehicleWireframeRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
                      return;
                  }
                  
@@ -268,6 +306,11 @@ export function Agents({ agents, trafficLights, frameRef }) {
                  const color = agent.isParked ? "#abcbfd" : getTypeColor(agent.type);
                  TEMP_COLOR.set(color);
                  vehicleMeshRef.current.setColorAt(i, TEMP_COLOR);
+
+                 // Update Vehicle Wireframe - Matches Body Transform
+                 if (vehicleWireframeRef.current) {
+                     vehicleWireframeRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
+                 }
 
                  // Update Vehicle Arrow
                  if (vehicleArrowRef.current) {
@@ -291,9 +334,11 @@ export function Agents({ agents, trafficLights, frameRef }) {
              });
              vehicleMeshRef.current.instanceMatrix.needsUpdate = true;
              if(vehicleMeshRef.current.instanceColor) vehicleMeshRef.current.instanceColor.needsUpdate = true;
-             
              if (vehicleArrowRef.current) {
                  vehicleArrowRef.current.instanceMatrix.needsUpdate = true;
+             }
+             if (vehicleWireframeRef.current) {
+                 vehicleWireframeRef.current.instanceMatrix.needsUpdate = true;
              }
         }
 
@@ -325,6 +370,22 @@ export function Agents({ agents, trafficLights, frameRef }) {
                       TEMP_COLOR.set('#34A853');
                       cycClothesRef.current.setColorAt(i, TEMP_COLOR);
                  }
+
+                 // Wireframe for Cyclist
+                 if (cycWireframeRef.current && agent.dims) {
+                       const st = getAgentState(agent);
+                       if (st) {
+                           TEMP_OBJECT.position.set(st.x, st.y, st.z + agent.dims[2] / 2); // Center on volume (assuming st.z is ground)
+                           TEMP_OBJECT.rotation.set(0, 0, st.yaw);
+                           TEMP_OBJECT.scale.set(agent.dims[0], agent.dims[1], agent.dims[2]);
+                           TEMP_OBJECT.updateMatrix();
+                           cycWireframeRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
+                       } else {
+                           TEMP_OBJECT.scale.set(0,0,0);
+                           TEMP_OBJECT.updateMatrix();
+                           cycWireframeRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
+                       }
+                 }
             });
              [cycFrameRef, cycWheelRef, cycClothesRef, cycSkinRef].forEach(r => {
                  if (r.current) {
@@ -332,6 +393,9 @@ export function Agents({ agents, trafficLights, frameRef }) {
                      if(r.current.instanceColor) r.current.instanceColor.needsUpdate = true;
                  }
             });
+            if (cycWireframeRef.current) {
+                cycWireframeRef.current.instanceMatrix.needsUpdate = true;
+            }
         }
         
         // Others (Signs etc) - Just use Box for now, instanced if we wanted, 
@@ -362,6 +426,18 @@ export function Agents({ agents, trafficLights, frameRef }) {
                     <instancedMesh ref={vehicleArrowRef} args={[ARROW_GEO, null, vehicles.length]}>
                          <meshBasicMaterial color="#999" transparent opacity={0.8} />
                     </instancedMesh>
+                    {/* Confidence Wireframe Shell */}
+                    <instancedMesh ref={vehicleWireframeRef} args={[null, null, vehicles.length]}>
+                       <boxGeometry args={[1, 1, 1]} />
+                       <meshBasicMaterial 
+                            color="#00FFFF" 
+                            wireframe={true} 
+                            transparent={true} 
+                            opacity={1.0}
+                            depthWrite={false}
+                            onBeforeCompile={wireframeShaderHandler}
+                       />
+                   </instancedMesh>
                 </group>
             )}
             
@@ -395,6 +471,17 @@ export function Agents({ agents, trafficLights, frameRef }) {
                      <instancedMesh ref={cycSkinRef} args={[CYC_GEOS.skinGeo, null, cyclists.length]}>
                           <meshStandardMaterial color="#f0d5be" />
                     </instancedMesh>
+                    <instancedMesh ref={cycWireframeRef} args={[null, null, cyclists.length]}>
+                       <boxGeometry args={[1, 1, 1]} />
+                       <meshBasicMaterial 
+                            color="#34A853" 
+                            wireframe={true} 
+                            transparent={true} 
+                            opacity={1.0}
+                            depthWrite={false}
+                            onBeforeCompile={wireframeShaderHandler}
+                       />
+                   </instancedMesh>
                 </group>
             )}
         </group>
