@@ -46,8 +46,12 @@ export function TrafficLights({ trafficLights, frameRef }) {
             if (step) {
                 const colorHex = getStateColor(step.state);
                 TEMP_COLOR.set(colorHex);
+                // Boost intensity for Bloom
+                if (step.state !== 0) {
+                     TEMP_COLOR.multiplyScalar(3.0); 
+                }
             } else {
-                TEMP_COLOR.set('#808080'); // Gray/Off
+                TEMP_COLOR.set('#101010'); // Dark Gray/Off (Lower than before)
             }
             bulbRef.current.setColorAt(i, TEMP_COLOR);
         });

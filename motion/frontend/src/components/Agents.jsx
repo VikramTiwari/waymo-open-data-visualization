@@ -206,6 +206,21 @@ const GENERIC_CAR_GEO = createGenericCarGeometry();
 const BOX_GEO_BOTTOM = new THREE.BoxGeometry(1, 1, 1);
 BOX_GEO_BOTTOM.translate(0, 0, 0.5);
 
+// Brake Lights Geometry (Two small boxes at the rear)
+function createBrakeLightGeometry() {
+    // Relative to a 1x1x1 box centered at 0,0,0.5? No, our cars are scaled.
+    // We'll trust the scaling. Car moves in +X? 
+    // Usually +X is forward. So Rear is -0.5 (if length is 1).
+    // Let's create two small boxes.
+    const leftLight = new THREE.BoxGeometry(0.05, 0.2, 0.1);
+    leftLight.translate(-0.5, 0.3, 0.4); // Rear (-x), Left (+y?), Height
+    const rightLight = new THREE.BoxGeometry(0.05, 0.2, 0.1);
+    rightLight.translate(-0.5, -0.3, 0.4);
+    
+    return BufferGeometryUtils.mergeGeometries([leftLight, rightLight]);
+}
+const BRAKE_LIGHT_GEO = createBrakeLightGeometry();
+
 
 export function Agents({ agents, trafficLights, frameRef }) {
 
@@ -238,6 +253,7 @@ export function Agents({ agents, trafficLights, frameRef }) {
     const vehicleMeshRef = useRef();
     const vehicleArrowRef = useRef(); 
     const vehicleWireframeRef = useRef();
+    const vehicleBrakeLightRef = useRef();
     // Peds Refs
     const pedPantsRef = useRef();
     const pedShirtRef = useRef();
@@ -365,6 +381,44 @@ export function Agents({ agents, trafficLights, frameRef }) {
                          vehicleArrowRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
                      }
                  }
+
+                 // Update Brake Lights
+                 if (vehicleBrakeLightRef.current) {
+                     // Calculate Acceleration/Braking
+                     const accel = st.accel || 0;
+                     const isBraking = accel < -1.0; // Threshold for braking
+                     
+                     // Sync Transform
+                     TEMP_OBJECT.position.set(st.x, st.y, st.z - h/2);
+                     TEMP_OBJECT.rotation.set(0, 0, st.yaw);
+                     TEMP_OBJECT.scale.set(agent.dims[0], agent.dims[1], agent.dims[2]);
+                     TEMP_OBJECT.updateMatrix();
+                     vehicleBrakeLightRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
+
+                     // Color - Emissive Boost for Bloom
+                     // Standard Red: #ff0000. 
+                     // Braking: Bright Neon Red #ff0000 with high intensity? 
+                     // ToneMapping might clamp, but Bloom threshold is 1.0.
+                     // If we want glow, we need updates. 
+                     // Actually InstancedMesh setColorAt sets the diffuse color.
+                     // Emissive intensity is global in standard material.
+                     // Strategy: Use a meshBasicMaterial for lights? 
+                     // Or use MeshStandardMaterial with high emissive?
+                     // Let's use MeshBasicMaterial.
+                     // Off: Dark Red #330000
+                     // On: Bright Red #ff0000 -> With Bloom it will glow if > 1.0? 
+                     // RGB 1.0 is max. Bloom threshold 1.0... 
+                     // We might need > 1.0 for strong bloom. 
+                     // R3F: extend color ranges or use toneMapped=false?
+                     // With toneMapped=false, colors > 1.0 are preserved.
+                     if (isBraking) {
+                        TEMP_COLOR.set('#ff0000');
+                        TEMP_COLOR.multiplyScalar(5.0); // Super bright
+                     } else {
+                        TEMP_COLOR.set('#330000');
+                     }
+                     vehicleBrakeLightRef.current.setColorAt(i, TEMP_COLOR);
+                 }
              });
              vehicleMeshRef.current.instanceMatrix.needsUpdate = true;
              if(vehicleMeshRef.current.instanceColor) vehicleMeshRef.current.instanceColor.needsUpdate = true;
@@ -373,6 +427,10 @@ export function Agents({ agents, trafficLights, frameRef }) {
              }
              if (vehicleWireframeRef.current) {
                  vehicleWireframeRef.current.instanceMatrix.needsUpdate = true;
+             }
+             if (vehicleBrakeLightRef.current) {
+                 vehicleBrakeLightRef.current.instanceMatrix.needsUpdate = true;
+                 if(vehicleBrakeLightRef.current.instanceColor) vehicleBrakeLightRef.current.instanceColor.needsUpdate = true;
              }
         }
 
@@ -452,7 +510,13 @@ export function Agents({ agents, trafficLights, frameRef }) {
             {vehicles.length > 0 && (
                 <group>
                     <instancedMesh ref={vehicleMeshRef} args={[GENERIC_CAR_GEO, null, vehicles.length]} frustumCulled={false}>
-                        <meshStandardMaterial metalness={0.6} roughness={0.2} />
+                        <meshPhysicalMaterial 
+                            metalness={0.6} 
+                            roughness={0.2} 
+                            clearcoat={0.8}
+                            clearcoatRoughness={0.1}
+                            color="#ffffff"
+                        />
                     </instancedMesh>
                     {/* Instanced Arrows for Vehicles - Muted Color but visible */}
                     <instancedMesh ref={vehicleArrowRef} args={[ARROW_GEO, null, vehicles.length]} frustumCulled={false}>
@@ -468,6 +532,10 @@ export function Agents({ agents, trafficLights, frameRef }) {
                              depthWrite={false}
                              onBeforeCompile={wireframeShaderHandler}
                         />
+                    </instancedMesh>
+                    {/* Brake Lights - Glowing */}
+                    <instancedMesh ref={vehicleBrakeLightRef} args={[BRAKE_LIGHT_GEO, null, vehicles.length]} frustumCulled={false}>
+                         <meshBasicMaterial toneMapped={false} />
                     </instancedMesh>
                 </group>
             )}

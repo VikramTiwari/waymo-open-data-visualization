@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Environment, ContactShadows } from '@react-three/drei';
+import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import { RoadGraph } from './components/RoadGraph';
 import { Agents } from './components/Agents';
 import { CameraRig } from './components/CameraRig';
@@ -586,23 +587,57 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
   // const isAudioEnabled = new URLSearchParams(window.location.search).get('audio') !== 'false';
   // Check lines 581 above. Let's be careful.
 
+    const [envName, setEnvName] = useState('night');
+    
+    const ENVS = useMemo(() => ({
+        night: '/dikhololo_night_1k.hdr?v=1',
+        city: '/potsdamer_platz_1k.hdr?v=1',
+        town: '/blaubeuren_night_1k.hdr',
+        rooftop: '/rooftop_night_1k.hdr',
+        dark: '/moonless_golf_1k.hdr',
+        // New Requested Options
+        shanghai: '/shanghai_bund_1k.hdr',
+        rogland: '/rogland_clear_night_1k.hdr',
+        studio: '/studio_small_09_1k.hdr',
+        sunrise: '/spruit_sunrise_1k.hdr',
+        street: '/urban_street_01_1k.hdr',
+        // Additional Options
+        garage: '/autoshop_01_1k.hdr',
+        parking: '/parking_garage_1k.hdr',
+        sunset: '/venice_sunset_1k.hdr',
+        bridge: '/adams_place_bridge_1k.hdr',
+        market: '/leadenhall_market_1k.hdr'
+    }), []);
+
+    // Auto-select random environment on data load
+    useEffect(() => {
+         const keys = Object.keys(ENVS);
+         const randomKey = keys[Math.floor(Math.random() * keys.length)];
+         setEnvName(randomKey);
+    }, [data, ENVS]);
+
   return (
     <div style={{ width: '100%', height: '100vh', position: 'relative', background: '#101010' }}>
         <Canvas camera={{ position: [0, -20, 20], fov: 45, up: [0, 0, 1] }} shadows>
-            <color attach="background" args={['#101010']} />
+            <color attach="background" args={['#050505']} />
             
-            <ambientLight intensity={0.4} />
+            <ambientLight intensity={0.1} /> {/* Darker ambient */}
             <directionalLight 
                 position={[50, 50, 100]} 
-                intensity={1.5} 
+                intensity={0.5} 
                 castShadow 
                 shadow-mapSize={[2048, 2048]}
             />
             
-            <Environment preset="city" />
+            {/* Local Environment Asset */}
+            <Environment files={ENVS[envName]} blur={0.6} background={false} />
             
             <OrbitControls makeDefault />
             <AnimationLoop />
+            
+            <EffectComposer disableNormalPass>
+                <Bloom luminanceThreshold={1.0} mipmapBlur intensity={1.5} radius={0.4} />
+            </EffectComposer>
             
             <group position={[0,0,-0.78]}>
                <ContactShadows resolution={1024} scale={200} blur={2} opacity={0.5} far={10} color="#000000" />
@@ -627,6 +662,7 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
             <div ref={frameUiRef}>Frame: 0 / {TOTAL_FRAMES}</div>
             <div ref={speedUiRef}>Speed: 0.00 m/s</div>
             <div>Cam: {cameraName}</div>
+            <div>Env: {envName.toUpperCase()}</div>
         </div>
     </div>
   );

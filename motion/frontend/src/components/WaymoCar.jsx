@@ -137,7 +137,13 @@ export function WaymoCar({ dims = [4.68, 2.0, 1.56], isBraking = false }) {
 
             {/* Lower Body */}
             <mesh geometry={bodyGeom} position={[0, 0, -width / 2]}>
-                <meshStandardMaterial color="#FFFFFF" roughness={0.6} metalness={0.1} />
+                <meshPhysicalMaterial 
+                    color="#FFFFFF" 
+                    roughness={0.2} 
+                    metalness={0.6} 
+                    clearcoat={1.0} 
+                    clearcoatRoughness={0.1} 
+                />
             </mesh>
 
             {/* Cabin Geometry - Centered on top */}
