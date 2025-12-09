@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls } from '@react-three/drei';
+import { OrbitControls, Environment, ContactShadows } from '@react-three/drei';
 import { RoadGraph } from './components/RoadGraph';
 import { Agents } from './components/Agents';
 import { CameraRig } from './components/CameraRig';
@@ -578,24 +578,42 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
      }
   }, [data, sdcSpeeds]);
 
-  const isAudioEnabled = new URLSearchParams(window.location.search).get('audio') !== 'false';
+  // ... imports moved to top
 
+// ... existing code ...
+
+
+  // const isAudioEnabled = new URLSearchParams(window.location.search).get('audio') !== 'false';
+  // Check lines 581 above. Let's be careful.
 
   return (
-    <div style={{ width: '100%', height: '100vh', position: 'relative', background: 'black' }}>
-        <Canvas camera={{ position: [0, -20, 20], fov: 45, up: [0, 0, 1] }}>
-            <color attach="background" args={['#000000']} />
-            <ambientLight intensity={0.5} />
-            <pointLight position={[50, 50, 100]} intensity={1.5} />
+    <div style={{ width: '100%', height: '100vh', position: 'relative', background: '#101010' }}>
+        <Canvas camera={{ position: [0, -20, 20], fov: 45, up: [0, 0, 1] }} shadows>
+            <color attach="background" args={['#101010']} />
+            
+            <ambientLight intensity={0.4} />
+            <directionalLight 
+                position={[50, 50, 100]} 
+                intensity={1.5} 
+                castShadow 
+                shadow-mapSize={[2048, 2048]}
+            />
+            
+            <Environment preset="city" />
+            
             <OrbitControls makeDefault />
             <AnimationLoop />
+            
+            <group position={[0,0,-0.78]}>
+               <ContactShadows resolution={1024} scale={200} blur={2} opacity={0.5} far={10} color="#000000" />
+            </group>
             
             {parsedMap && <RoadGraph map={parsedMap} center={center} />}
             {parsedMap && <SdcPathHighlight sdcState={parsedSdcState} frameRef={frameRef} />}
             {parsedPathSamples && <PathSamples vertices={parsedPathSamples} />}
             {parsedMap && <Agents agents={parsedAgents} trafficLights={parsedTrafficLights} frameRef={frameRef} />} 
             {parsedTrafficLights && <TrafficLights key="traffic-lights-spheres" trafficLights={parsedTrafficLights} frameRef={frameRef} />}
-            {isAudioEnabled && parsedMap && null /* Audio Removed */}
+            
             {(() => {
                  const isAuto = new URLSearchParams(window.location.search).get('autoCamera') !== 'false';
                  return parsedMap && <CameraRig map={parsedMap} frameRef={frameRef} center={center} variant={variant} isAuto={isAuto} onCameraChange={setCameraName} />;
@@ -613,3 +631,4 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
     </div>
   );
 }
+

@@ -180,9 +180,36 @@ const wireframeShaderHandler = (shader) => {
 };
 
 
+// ... (previous imports)
+
+// ... existing geometry factories ...
+
+function createGenericCarGeometry() {
+    // 1. Chassis (Bottom Box)
+    // Dimensions relative to bounding box (1,1,1).
+    // X=Length, Y=Width, Z=Height (Z-Up world)
+    // Chassis height ~40% of total
+    const chassis = new THREE.BoxGeometry(1, 1, 0.4); 
+    chassis.translate(0, 0, 0.2); // Sit on ground (0..0.4)
+
+    // 2. Cabin (Top Box)
+    // We want total height to be 1.0 (Unit Height) so scaling by agent.height works.
+    // Bottom sits at 0.4. Top should be at 1.0. Height = 0.6.
+    const cabin = new THREE.BoxGeometry(0.6, 0.9, 0.6);
+    cabin.translate(-0.1, 0, 0.7); // Sits on top (0.4 + 0.3) -> Center 0.7 extends 0.4 to 1.0
+
+    return BufferGeometryUtils.mergeGeometries([chassis, cabin]);
+}
+const GENERIC_CAR_GEO = createGenericCarGeometry();
+
+// Bottom-aligned Box for Wireframes
+const BOX_GEO_BOTTOM = new THREE.BoxGeometry(1, 1, 1);
+BOX_GEO_BOTTOM.translate(0, 0, 0.5);
+
+
 export function Agents({ agents, trafficLights, frameRef }) {
 
-    // Split Agents
+    // ... (split agents logic - no change) ...
     const { sdc, peds, cyclists, vehicles, others } = useMemo(() => {
         const sdcArr = [];
         const pedsArr = [];
@@ -207,25 +234,23 @@ export function Agents({ agents, trafficLights, frameRef }) {
         return { sdc: sdcArr, peds: pedsArr, cyclists: cyclistsArr, vehicles: vehiclesArr, others: othersArr };
     }, [agents]);
 
-    // --- INSTANCING REFS ---
-    // --- INSTANCING REFS ---
+    // ... (refs - no change) ...
     const vehicleMeshRef = useRef();
-    const vehicleArrowRef = useRef(); // New Ref for Arrows
-    const vehicleWireframeRef = useRef(); // Wireframe Ref
-    
+    const vehicleArrowRef = useRef(); 
+    const vehicleWireframeRef = useRef();
     // Peds Refs
     const pedPantsRef = useRef();
     const pedShirtRef = useRef();
     const pedSkinRef = useRef();
-    
     // Cyclist Refs
     const cycFrameRef = useRef();
     const cycWheelRef = useRef();
     const cycClothesRef = useRef();
     const cycSkinRef = useRef();
-    const cycWireframeRef = useRef(); // Wireframe Ref
+    const cycWireframeRef = useRef();
 
-    // --- UPDATE LOOP ---
+
+    // ... (update loop) ...
     useFrame(() => {
         if (!frameRef) return;
         const currentFrame = frameRef.current;
@@ -266,7 +291,11 @@ export function Agents({ agents, trafficLights, frameRef }) {
                  return;
             }
             
-            TEMP_OBJECT.position.set(st.x, st.y, st.z);
+            // Fix Floating: Waymo Z is Centroid. Geometries are Bottom-Aligned.
+            // Subtract half-height.
+            const h = agent.dims[2] || 1.5;
+            TEMP_OBJECT.position.set(st.x, st.y, st.z - h/2);
+            
             TEMP_OBJECT.rotation.set(0, 0, st.yaw);
             if (scaleOverride) {
                  TEMP_OBJECT.scale.set(scaleOverride[0], scaleOverride[1], scaleOverride[2]);
@@ -296,10 +325,15 @@ export function Agents({ agents, trafficLights, frameRef }) {
                      return;
                  }
                  
-                 // Update Vehicle Body
-                 TEMP_OBJECT.position.set(st.x, st.y, st.z);
+                 // Fix Floating: Offset Z by Half Height
+                 const h = agent.dims[2];
+                 TEMP_OBJECT.position.set(st.x, st.y, st.z - h/2);
+                 
                  TEMP_OBJECT.rotation.set(0, 0, st.yaw);
+                 
+                 // Scale using correct dims (Generic Geometry normalized to 1,1,1 approx)
                  TEMP_OBJECT.scale.set(agent.dims[0], agent.dims[1], agent.dims[2]);
+
                  TEMP_OBJECT.updateMatrix();
                  vehicleMeshRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
                  
@@ -342,6 +376,8 @@ export function Agents({ agents, trafficLights, frameRef }) {
              }
         }
 
+        
+        // ... (peds/cyclists update - same as before) ...
         // Pedestrians
         if (peds.length > 0) {
             peds.forEach((agent, i) => {
@@ -397,10 +433,7 @@ export function Agents({ agents, trafficLights, frameRef }) {
                 cycWireframeRef.current.instanceMatrix.needsUpdate = true;
             }
         }
-        
-        // Others (Signs etc) - Just use Box for now, instanced if we wanted, 
-        // but 'others' might be heterogeneous. Let's reuse instancedVehicles logic for Unknowns?
-        // Actually, we usually don't see many type 0 or 3. 
+
     });
 
     return (
@@ -415,42 +448,40 @@ export function Agents({ agents, trafficLights, frameRef }) {
                  <AgentItem key={`other-${agent.id}-${index}`} agent={agent} frameRef={frameRef} />
             ))}
             
-            {/* Vehicles */}
+            {/* Vehicles - Now using GENERIC_CAR_GEO */}
             {vehicles.length > 0 && (
                 <group>
-                    <instancedMesh ref={vehicleMeshRef} args={[null, null, vehicles.length]}>
-                        <boxGeometry args={[1, 1, 1]} />
-                        <meshStandardMaterial />
+                    <instancedMesh ref={vehicleMeshRef} args={[GENERIC_CAR_GEO, null, vehicles.length]} frustumCulled={false}>
+                        <meshStandardMaterial metalness={0.6} roughness={0.2} />
                     </instancedMesh>
                     {/* Instanced Arrows for Vehicles - Muted Color but visible */}
-                    <instancedMesh ref={vehicleArrowRef} args={[ARROW_GEO, null, vehicles.length]}>
-                         <meshBasicMaterial color="#999" transparent opacity={0.8} />
+                    <instancedMesh ref={vehicleArrowRef} args={[ARROW_GEO, null, vehicles.length]} frustumCulled={false}>
+                         <meshBasicMaterial color="#999" transparent opacity={0.5} />
                     </instancedMesh>
                     {/* Confidence Wireframe Shell */}
-                    <instancedMesh ref={vehicleWireframeRef} args={[null, null, vehicles.length]}>
-                       <boxGeometry args={[1, 1, 1]} />
-                       <meshBasicMaterial 
-                            color="#00FFFF" 
-                            wireframe={true} 
-                            transparent={true} 
-                            opacity={1.0}
-                            depthWrite={false}
-                            onBeforeCompile={wireframeShaderHandler}
-                       />
-                   </instancedMesh>
+                    <instancedMesh ref={vehicleWireframeRef} args={[BOX_GEO_BOTTOM, null, vehicles.length]} frustumCulled={false}>
+                        <meshBasicMaterial 
+                             color="#00FFFF" 
+                             wireframe={true} 
+                             transparent={true} 
+                             opacity={1.0}
+                             depthWrite={false}
+                             onBeforeCompile={wireframeShaderHandler}
+                        />
+                    </instancedMesh>
                 </group>
             )}
             
             {/* Pedestrians */}
             {peds.length > 0 && (
                 <group>
-                    <instancedMesh ref={pedPantsRef} args={[PED_GEOS.pantsGeo, null, peds.length]}>
+                    <instancedMesh ref={pedPantsRef} args={[PED_GEOS.pantsGeo, null, peds.length]} frustumCulled={false}>
                          <meshStandardMaterial color="#333" />
                     </instancedMesh>
-                    <instancedMesh ref={pedShirtRef} args={[PED_GEOS.shirtGeo, null, peds.length]}>
+                    <instancedMesh ref={pedShirtRef} args={[PED_GEOS.shirtGeo, null, peds.length]} frustumCulled={false}>
                          <meshStandardMaterial />
                     </instancedMesh>
-                    <instancedMesh ref={pedSkinRef} args={[PED_GEOS.skinGeo, null, peds.length]}>
+                    <instancedMesh ref={pedSkinRef} args={[PED_GEOS.skinGeo, null, peds.length]} frustumCulled={false}>
                          <meshStandardMaterial color="#f0d5be" />
                     </instancedMesh>
                 </group>
@@ -459,20 +490,19 @@ export function Agents({ agents, trafficLights, frameRef }) {
             {/* Cyclists */}
             {cyclists.length > 0 && (
                 <group>
-                    <instancedMesh ref={cycFrameRef} args={[CYC_GEOS.frameGeo, null, cyclists.length]}>
+                    <instancedMesh ref={cycFrameRef} args={[CYC_GEOS.frameGeo, null, cyclists.length]} frustumCulled={false}>
                          <meshStandardMaterial color="#555" metalness={0.8} roughness={0.3} />
                     </instancedMesh>
-                    <instancedMesh ref={cycWheelRef} args={[CYC_GEOS.wheelGeo, null, cyclists.length]}>
+                    <instancedMesh ref={cycWheelRef} args={[CYC_GEOS.wheelGeo, null, cyclists.length]} frustumCulled={false}>
                          <meshStandardMaterial color="#222" />
                     </instancedMesh>
-                    <instancedMesh ref={cycClothesRef} args={[CYC_GEOS.clothesGeo, null, cyclists.length]}>
+                    <instancedMesh ref={cycClothesRef} args={[CYC_GEOS.clothesGeo, null, cyclists.length]} frustumCulled={false}>
                           <meshStandardMaterial />
                     </instancedMesh>
-                     <instancedMesh ref={cycSkinRef} args={[CYC_GEOS.skinGeo, null, cyclists.length]}>
+                     <instancedMesh ref={cycSkinRef} args={[CYC_GEOS.skinGeo, null, cyclists.length]} frustumCulled={false}>
                           <meshStandardMaterial color="#f0d5be" />
                     </instancedMesh>
-                    <instancedMesh ref={cycWireframeRef} args={[null, null, cyclists.length]}>
-                       <boxGeometry args={[1, 1, 1]} />
+                    <instancedMesh ref={cycWireframeRef} args={[BOX_GEO_BOTTOM, null, cyclists.length]} frustumCulled={false}>
                        <meshBasicMaterial 
                             color="#34A853" 
                             wireframe={true} 
