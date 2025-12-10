@@ -160,7 +160,8 @@ function RoadGraphComponent({ map, center }) {
         const xyz = getVal('roadgraph_samples/xyz');
         const ids = getVal('roadgraph_samples/id');
         const types = getVal('roadgraph_samples/type'); 
-        
+        const dirs = getVal('roadgraph_samples/dir');
+
         if (!xyz.length || !ids.length) return { lanes: {}, markings: [], stopSigns: [], speedBumps: [], crosswalks: [] };
         
         const segments = {};
@@ -178,7 +179,12 @@ function RoadGraphComponent({ map, center }) {
             const point = new THREE.Vector3(x, y, z);
 
             if (type === 17) {
-                stopSignsList.push({ pos: point, id });
+                let dir = null;
+                // dir should correspond to the point
+                if (dirs && dirs.length > i * 3 + 2) {
+                    dir = new THREE.Vector3(dirs[i*3], dirs[i*3+1], dirs[i*3+2]);
+                }
+                stopSignsList.push({ pos: point, id, dir });
             } else if (type === 19) {
                 if (!speedBumpsMap[id]) speedBumpsMap[id] = [];
                 speedBumpsMap[id].push(point);
@@ -293,22 +299,65 @@ function RoadGraphComponent({ map, center }) {
     // --- STOP SIGNS ---
     const stopSignMesh = useMemo(() => {
         if (stopSigns.length === 0) return null;
-        // Octagonal Prism, rotated to lie flat, elevated to sit on ground
-        const geom = new THREE.CylinderGeometry(0.8, 0.8, 0.05, 8);
-        geom.rotateX(Math.PI / 2); // Align with Z-up (lying flat)
-        geom.translate(0, 0, 0.025); // Sit on ground (Z=0 to 0.05)
+
+        // 1. Create Pole Geometry
+        // Vertical Cylinder. Radius 0.05m, Height 2.2m.
+        // Base at 0, Top at 2.2.
+        // CylinderGeometry(0.05, 0.05, 2.2) default center at (0,0,0) (so -1.1 to 1.1)
+        // Rotate X 90 -> Vertical (Z-up).
+        // Translate Z +1.1 -> Base at 0, Top at 2.2.
+        // 1. Create Pole Geometry
+        // Vertical Cylinder. Radius 0.05m, Height 3m.
+        // Assumes data point is at the sign (elevated). Extend pole down.
+        // Rotate X 90 -> Vertical (Z-up).
+        // Range [-1.5, 1.5] -> Translate Z -1.5 -> [-3.0, 0]
+        const poleGeo = new THREE.CylinderGeometry(0.05, 0.05, 3.0, 8);
+        poleGeo.rotateX(Math.PI / 2);
+        poleGeo.translate(0, 0, -1.5);
+
+        // 2. Create Sign Geometry (Octagon)
+        // Position at Z=0 (The data point)
+        const signGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.05, 8);
+        signGeo.rotateZ(Math.PI / 2);
+        // signGeo.translate(0, 0, 0); // Centered at data point
+
+        // 3. Merge geometries with groups
+        const mergedGeo = BufferGeometryUtils.mergeGeometries([poleGeo, signGeo], false);
         
-        const mat = new THREE.MeshBasicMaterial({ color: '#ff0000' });
-        const mesh = new THREE.InstancedMesh(geom, mat, stopSigns.length);
+        // Add groups
+        mergedGeo.clearGroups();
+        // Use indices count
+        const poleIndexCount = poleGeo.index.count;
+        const signIndexCount = signGeo.index.count;
+
+        mergedGeo.addGroup(0, poleIndexCount, 0);
+        mergedGeo.addGroup(poleIndexCount, signIndexCount, 1); // Material 1 (Sign)
+
+        // Materials
+        const poleMat = new THREE.MeshStandardMaterial({ color: '#888888', roughness: 0.8 });
+        const signMat = new THREE.MeshBasicMaterial({ color: '#ff0000' }); // Basic for bright red
+
+        const mesh = new THREE.InstancedMesh(mergedGeo, [poleMat, signMat], stopSigns.length);
         
         const dummy = new THREE.Object3D();
+
         stopSigns.forEach((sign, i) => {
             dummy.position.copy(sign.pos);
-            // Ensure no rotation overrides alignment
-            dummy.rotation.set(0,0,0);
+
+            // Orientation
+            if (sign.dir) {
+                // Calculate Yaw from dir
+                const yaw = Math.atan2(sign.dir.y, sign.dir.x);
+                // Rotate around Z axis (which is up)
+                dummy.rotation.set(0, 0, yaw);
+            } else {
+                dummy.rotation.set(0, 0, 0);
+            }
+
             dummy.updateMatrix();
             mesh.setMatrixAt(i, dummy.matrix);
         });
+
         mesh.instanceMatrix.needsUpdate = true;
         return mesh;
     }, [stopSigns]);
