@@ -1,6 +1,6 @@
 import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Billboard } from '@react-three/drei';
+
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { WaymoCar } from './WaymoCar';
@@ -590,11 +590,7 @@ function AgentItem({ agent, trafficLights, frameRef }) {
     const groupRef = useRef();
     const arrowRef = useRef();
     const bodyRef = useRef();
-    const bubbleRef = useRef();
-    
-    // Bubble Logic Refs
-    const visibleRef = useRef(false);
-    const lastSeenFrameRef = useRef(-100);
+
 
     const [isBraking, setIsBraking] = React.useState(false);
 
@@ -654,70 +650,8 @@ function AgentItem({ agent, trafficLights, frameRef }) {
             }
         }
         
-        // --- TRAFFIC LIGHT BUBBLE LOGIC (SDC Only) ---
-        if (agent.isSdc && bubbleRef.current && trafficLights) {
-            // Hysteresis
-            let speedCondition = false;
-            if (visibleRef.current) {
-                if (speed < 0.5) speedCondition = true;
-            } else {
-                if (speed < 0.2) speedCondition = true;
-            }
-
-            let foundRedLight = false;
-            if (speedCondition) {
-                const RED_STATES = [1, 4, 7];
-                // Car Forward Vector
-                const carFx = Math.cos(yaw);
-                const carFy = Math.sin(yaw);
-
-                // Scan lights
-                for (const light of trafficLights) {
-                     // Check light state at CURRENT FRAME (floor)
-                     const safeLightFrame = Math.min(Math.max(0, idx1), light.trajectory.length - 1);
-                     const lStep = light.trajectory[safeLightFrame];
-                     const state = lStep ? lStep.state : 0;
-
-                     if (RED_STATES.includes(state)) {
-                         const dx = light.x - x;
-                         const dy = light.y - y;
-                         const distSq = dx*dx + dy*dy;
-                         
-                         // < 30m
-                         if (distSq < 900) {
-                             // Dot Product (FoV 120 deg)
-                             const len = Math.sqrt(distSq);
-                             const dot = carFx * (dx/len) + carFy * (dy/len);
-                             if (dot > 0.5) {
-                                 foundRedLight = true;
-                                 break;
-                             }
-                         }
-                     }
-                }
-            }
-            
-            // Debounce
-            if (foundRedLight) lastSeenFrameRef.current = currentFrame;
-            
-            let show = false;
-            if (foundRedLight) show = true;
-            else if (currentFrame - lastSeenFrameRef.current < 30) show = true;
-
-            // Strict Speed Cutoff
-            if (!speedCondition && visibleRef.current) show = false;
-
-            if (show !== visibleRef.current) {
-                bubbleRef.current.visible = show;
-                visibleRef.current = show;
-            }
-        }
     });
-    
-    // We need Billboard from Drei for the bubble
-    // Wait, Billboard might not be imported in Agents.jsx.
-    // I need to check imports.
-    // Assuming I can add the bubble mesh groupRef first.
+
 
     return (
         <group ref={groupRef}>
@@ -743,23 +677,7 @@ function AgentItem({ agent, trafficLights, frameRef }) {
                  </mesh>
              </group>
              
-             {/* SDC Thought Bubble (Attached to Group) */}
-             {agent.isSdc && (
-                <group ref={bubbleRef} visible={false} position={[0, 0, 2.2]}>
-                    <Billboard follow={true} lockX={false} lockY={false} lockZ={false}>
-                        <group scale={0.8} name="bubble-visual">
-                             <mesh position={[0, 0, 0]}> 
-                                 <circleGeometry args={[0.5, 32]} />
-                                 <meshBasicMaterial color="white" transparent opacity={0.9} />
-                             </mesh>
-                             <mesh position={[0, 0, 0.01]}> 
-                                <planeGeometry args={[0.4, 0.4]} />
-                                <meshBasicMaterial color="red" />
-                             </mesh>
-                        </group>
-                    </Billboard>
-                </group>
-             )}
+
 
              {agent.isSdc && (
                  <mesh position={[0, 0, -0.7]} rotation={[0, 0, 0]}>
