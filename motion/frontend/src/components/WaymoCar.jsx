@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import * as THREE from 'three';
 
 export function WaymoCar({ dims = [4.68, 2.0, 1.56], isBraking = false }) {
@@ -131,9 +131,14 @@ export function WaymoCar({ dims = [4.68, 2.0, 1.56], isBraking = false }) {
         };
     }, [length, width, height]);
 
+    // Create a target object for the headlights to look at
+    // We'll position this 10m ahead of the car relative to its origin
+    const [headlightTarget] = useState(() => new THREE.Object3D());
+
     return (
         <group rotation={[Math.PI / 2, 0, 0]} position={[0, 0, -height / 2]}>
-            {/* ... Coordinate System comments ... */}
+            {/* Target for Spotlights (Invisible) */}
+            <primitive object={headlightTarget} position={[10, 0, 0]} />
 
             {/* Lower Body */}
             <mesh geometry={bodyGeom} position={[0, 0, -width / 2]}>
@@ -151,12 +156,6 @@ export function WaymoCar({ dims = [4.68, 2.0, 1.56], isBraking = false }) {
                  <meshStandardMaterial color="#111111" roughness={0.2} metalness={0.8} />
             </mesh>
             
-            {/* Details and Sensors need to be adjusted for height if needed... 
-                But let's leave them relative for now or they might float inside/outside.
-                Actually, grill/lights depended on height * 0.35.
-                with groundClearance 0.35, the grill might be low.
-                Let's bump them.
-            */}
             
              {/* Front Grill - Bump Height */}
             <mesh position={[length / 2 - 0.05, height * 0.45, 0]} rotation={[0, Math.PI / 2, 0]}>
@@ -170,24 +169,62 @@ export function WaymoCar({ dims = [4.68, 2.0, 1.56], isBraking = false }) {
             </mesh>
 
             {/* Headlights - Bump Height */}
-            <Light position={[length / 2 - 0.1, height * 0.52, width * 0.35]} color="#E0E0FF" scale={[0.4, 0.15, 0.6]} rotation={[0, 0, -0.1]} />
-            <Light position={[length / 2 - 0.1, height * 0.52, -width * 0.35]} color="#E0E0FF" scale={[0.4, 0.15, 0.6]} rotation={[0, 0, -0.1]} />
+            {/* Real Spotlights + Physical Mesh */}
+            <group position={[length / 2 - 0.1, height * 0.52, width * 0.35]}>
+                <Light color="#E0E0FF" scale={[0.4, 0.15, 0.6]} rotation={[0, 0, -0.1]} />
+                <spotLight
+                    color="#E0E0FF"
+                    intensity={20}
+                    distance={50}
+                    angle={0.6}
+                    penumbra={0.2}
+                    attenuation={5}
+                    anglePower={5}
+                    target={headlightTarget}
+                    castShadow
+                />
+            </group>
+
+            <group position={[length / 2 - 0.1, height * 0.52, -width * 0.35]}>
+                <Light color="#E0E0FF" scale={[0.4, 0.15, 0.6]} rotation={[0, 0, -0.1]} />
+                 <spotLight
+                    color="#E0E0FF"
+                    intensity={20}
+                    distance={50}
+                    angle={0.6}
+                    penumbra={0.2}
+                    attenuation={5}
+                    anglePower={5}
+                    target={headlightTarget}
+                    castShadow
+                />
+            </group>
 
             {/* Taillights (Rear) - Red (Brake) - Circular-ish */}
-            <Light 
-                position={[-length * 0.5 - 0.15, height * 0.6, width * 0.4]} 
-                color="#FF0000" 
-                intensity={isBraking ? 5.0 : 2.0} 
-                scale={[0.1, 0.25, 0.25]} 
-                shape="circle"
-            />
-            <Light 
-                position={[-length * 0.5 - 0.15, height * 0.6, -width * 0.4]} 
-                color="#FF0000" 
-                intensity={isBraking ? 5.0 : 2.0} 
-                scale={[0.1, 0.25, 0.25]} 
-                shape="circle"
-            />
+            {/* Dynamic Light for Braking */}
+            <group position={[-length * 0.5 - 0.15, height * 0.6, width * 0.4]}>
+                <Light
+                    color="#FF0000"
+                    intensity={isBraking ? 5.0 : 2.0}
+                    scale={[0.1, 0.25, 0.25]}
+                    shape="circle"
+                />
+                {isBraking && (
+                    <pointLight color="#FF0000" intensity={5} distance={3} decay={2} />
+                )}
+            </group>
+
+            <group position={[-length * 0.5 - 0.15, height * 0.6, -width * 0.4]}>
+                <Light
+                    color="#FF0000"
+                    intensity={isBraking ? 5.0 : 2.0}
+                    scale={[0.1, 0.25, 0.25]}
+                    shape="circle"
+                />
+                 {isBraking && (
+                    <pointLight color="#FF0000" intensity={5} distance={3} decay={2} />
+                )}
+            </group>
 
             {/* Turn Signals (Amber) - Circular-ish */}
             <Light 
@@ -207,42 +244,6 @@ export function WaymoCar({ dims = [4.68, 2.0, 1.56], isBraking = false }) {
 
 
             {/* --- Wheels --- */}
-            {/* Positioned relative to car center. 
-                New Radius 0.55. Y Position should be 0.55 to sit on ground (if Z=-height/2 is ground? No, usually 0 is center).
-                Wait, if group is at -height/2 (-0.78), and wheel Y is 0.55. Wheel bottom is at -0.23 rel to group.
-                Group Y in World is Z. Group Z is -0.78. 
-                Wheel Bottom World Z = -0.78 + 0 (if wheel Y=0.55 and Radius=0.55 -> bottom is 0 rel to wheel center 0.55).
-                Wait, Wheel Center Y = 0.55. Bottom Y = 0.
-                So Wheel Bottom matches Group origin Y (which is 0 in Shape coords).
-                Shape coords Y map to World Z.
-                So Wheel Bottom World Z = Group World Z.
-                Group World Z is -height/2 = -0.78.
-                So Wheel is subterranean.
-                
-                We want Wheel on ground (World Z=0).
-                If Group World Z = -0.78.
-                We need Wheel Bottom World Z = 0.
-                So Wheel Bottom Local Y needs to be +0.78.
-                So Wheel Center Local Y needs to be +0.78 + 0.55 = 1.33.
-                
-                Previously: Y was 0.36. Radius 0.36. Bottom at 0. Group at -height/2.
-                So the old car WAS subterranean by 0.78m?
-                Or does existing code assume `WaymoCar` is positioned at Ground?
-                `Agents.jsx`: 
-                `position={[agent.x - center[0], agent.y - center[1], agent.z - center[2]]}`.
-                `agent.z` is usually centroid or bottom? Waymo data `z` is centroid of bbox.
-                Bbox height 1.56. Centroid Z ~ 0.78.
-                So `agent.z` is ~0.78.
-                If Scene center[2] is 0 (approx).
-                Car is at Z=0.78.
-                Group is at Z = 0.78 + (-0.78) = 0.
-                So Group Origin IS at roughly Ground Level (Z=0).
-                
-                So, if Group Origin is Ground:
-                Wheel Bottom Local Y shoud be 0.
-                Wheel Center Local Y = Radius.
-                So for Radius 0.55, Center Y = 0.55.
-            */}
             <DetailedWheel position={[length * 0.36, 0.55, width * 0.52]} radius={0.55} />
             <DetailedWheel position={[length * 0.36, 0.55, -width * 0.52]} radius={0.55} rotation={[Math.PI, 0, 0]} />
             <DetailedWheel position={[-length * 0.36, 0.55, width * 0.52]} radius={0.55} />
