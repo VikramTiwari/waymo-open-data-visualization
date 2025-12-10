@@ -10,8 +10,11 @@ import { TrafficLights } from './components/TrafficLights';
 import { PathSamples } from './components/PathSamples';
 import { SdcPathHighlight } from './components/SdcPathHighlight';
 import { TrafficLightHighlight } from './components/TrafficLightHighlight';
-import { AgentTrajectories } from './components/AgentTrajectories';
+
 import { Rain } from './components/Rain';
+import { Snow } from './components/Snow';
+import { Dust } from './components/Dust';
+import { Lightning } from './components/Lightning';
 
 export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
   // Removed frame state to prevent full scene re-renders
@@ -590,6 +593,7 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
   // Check lines 581 above. Let's be careful.
 
     const [envName, setEnvName] = useState('night');
+    const [weather, setWeather] = useState('clear'); // clear, rain, snow, fog, dust, storm
     
     const ENVS = useMemo(() => ({
         night: '/dikhololo_night_1k.hdr?v=1',
@@ -611,11 +615,21 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
         market: '/leadenhall_market_1k.hdr'
     }), []);
 
-    // Auto-select random environment on data load
+    // Auto-select random environment and weather on data load
     useEffect(() => {
          const keys = Object.keys(ENVS);
          const randomKey = keys[Math.floor(Math.random() * keys.length)];
          setEnvName(randomKey);
+
+         // Weather Probability: 80% Clear, 20% Special
+         const r = Math.random();
+         if (r > 0.8) {
+             const types = ['rain', 'snow', 'fog', 'dust', 'storm'];
+             setWeather(types[Math.floor(Math.random() * types.length)]);
+         } else {
+             setWeather('clear');
+         }
+         
     }, [data, ENVS]);
 
   return (
@@ -634,6 +648,13 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
             {/* Local Environment Asset */}
             <Environment files={ENVS[envName]} blur={0.6} background={false} />
             
+            {/* Weather Effects */}
+            {weather === 'fog' && <fog attach="fog" args={['#1a1a1a', 10, 80]} />}
+            {weather === 'dust' && <fog attach="fog" args={['#e6c288', 5, 60]} />} 
+            
+            {/* Storm is darker */}
+            {weather === 'storm' && <fog attach="fog" args={['#050510', 10, 100]} />}
+            
             <OrbitControls makeDefault />
             <AnimationLoop />
             
@@ -649,14 +670,15 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
             {parsedMap && <SdcPathHighlight sdcState={parsedSdcState} frameRef={frameRef} />}
             {parsedPathSamples && <PathSamples vertices={parsedPathSamples} />}
 
-            {/* New Information Layer: Agent Trajectories */}
-            {parsedMap && <AgentTrajectories agents={parsedAgents} frameRef={frameRef} />}
 
             {parsedMap && <Agents agents={parsedAgents} trafficLights={parsedTrafficLights} frameRef={frameRef} />} 
             {parsedTrafficLights && <TrafficLights key="traffic-lights-spheres" trafficLights={parsedTrafficLights} frameRef={frameRef} />}
             
-            {/* New Visual Layer: Rain */}
-            <Rain />
+            {/* New Visual Layer: Weather */}
+            {(weather === 'rain' || weather === 'storm') && <Rain count={weather === 'storm' ? 15000 : 10000} />}
+            {weather === 'snow' && <Snow />}
+            {weather === 'dust' && <Dust />}
+            {weather === 'storm' && <Lightning />}
 
             {(() => {
                  const isAuto = new URLSearchParams(window.location.search).get('autoCamera') !== 'false';
@@ -666,12 +688,10 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
         
         {/* Minimal Info */}
         <div style={{ position: 'absolute', bottom: 20, left: 20, color: 'white', fontFamily: 'monospace', opacity: 0.7 }}>
-            <div>Scn: {scenarioInfo ? `${scenarioInfo.index}/${scenarioInfo.total} - ` : ''}{scenarioId || 'Loading...'}</div>
-            <div>File: {fileInfo ? `${fileInfo.index}/${fileInfo.total} - ${fileInfo.name}` : 'Loading...'}</div>
-            <div ref={frameUiRef}>Frame: 0 / {TOTAL_FRAMES}</div>
             <div ref={speedUiRef}>Speed: 0.00 m/s</div>
-            <div>Cam: {cameraName}</div>
-            <div>Env: {envName.toUpperCase()}</div>
+            <div>Camera: {cameraName} | Env: {envName.toUpperCase()}{weather !== 'clear' ? ` + ${weather.toUpperCase()}` : ''}</div>
+            <div ref={frameUiRef}>Frame: 0 / {TOTAL_FRAMES}</div>
+            <div>File: {fileInfo ? `${fileInfo.index}/${fileInfo.total} - ${fileInfo.name}` : 'Loading...'} | Scenario: {scenarioInfo ? `${scenarioInfo.index}/${scenarioInfo.total} - ` : ''}{scenarioId || 'Loading...'}</div>
         </div>
     </div>
   );
