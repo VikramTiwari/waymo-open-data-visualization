@@ -309,10 +309,58 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
     
     const [cx, cy, cz] = center;
 
+    // RoadGraph samples for orientation
+    const mapIds = getVal('roadgraph_samples/id');
+    const mapDir = getVal('roadgraph_samples/dir');
+    const mapX = getVal('roadgraph_samples/xyz');
+
+    // Build efficient lookup for map samples
+    const samplesById = new Map();
+    if (mapIds && mapDir && mapX) {
+        for(let i=0; i<mapIds.length; i++) {
+             const id = mapIds[i];
+             if(!samplesById.has(id)) {
+                 samplesById.set(id, []);
+             }
+             samplesById.get(id).push(i);
+        }
+    }
+
     const parsedLights = [];
     
     for (let i = 0; i < count; i++) {
         if (currentValid && currentValid[i] === 0) continue;
+
+        const x = (currentX[i] || 0) - cx;
+        const y = (currentY[i] || 0) - cy;
+        const z = (currentZ[i] || 0) - cz;
+
+        // Orientation
+        // Find nearest roadgraph sample with same ID
+        let yaw = 0;
+        const sIndices = samplesById.get(ids[i]);
+        if (sIndices) {
+            let minDist = Infinity;
+            let bestIdx = -1;
+            for(const idx of sIndices) {
+                const mx = mapX[idx*3] - cx;
+                const my = mapX[idx*3+1] - cy;
+                const mz = mapX[idx*3+2] - cz;
+                const d = (mx-x)*(mx-x) + (my-y)*(my-y) + (mz-z)*(mz-z);
+                if (d < minDist) {
+                    minDist = d;
+                    bestIdx = idx;
+                }
+            }
+
+            if (bestIdx !== -1) {
+                const dx = mapDir[bestIdx*3];
+                const dy = mapDir[bestIdx*3+1];
+                // Traffic flows in (dx, dy). Light faces oncoming traffic.
+                // So Light Yaw = Lane Yaw + PI
+                yaw = Math.atan2(dy, dx) + Math.PI;
+            }
+        }
 
         const trajectory = [];
         
@@ -345,14 +393,10 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
             });
         }
         
-        // Position
-        const x = (currentX[i] || 0) - cx;
-        const y = (currentY[i] || 0) - cy;
-        const z = (currentZ[i] || 0) - cz;
-
         parsedLights.push({
             id: ids[i],
             x, y, z,
+            yaw,
             trajectory
         });
     }
