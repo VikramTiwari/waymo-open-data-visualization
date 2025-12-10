@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { parseData } from '../utils/parsers';
 
 export function useRecordBuffer(baseUrl, bufferLimit = 5) {
   const [currentRecord, setCurrentRecord] = useState(null);
@@ -49,8 +50,10 @@ export function useRecordBuffer(baseUrl, bufferLimit = 5) {
           isStreamDoneRef.current = true;
           console.log('Stream finished');
         } else {
+          // Parse in background/buffer time
+          const parsed = parseData(json.record);
           bufferRef.current.push({
-            record: json.record,
+            record: parsed,
             fileInfo: json.fileInfo,
             scenarioInfo: json.scenarioInfo
           });
