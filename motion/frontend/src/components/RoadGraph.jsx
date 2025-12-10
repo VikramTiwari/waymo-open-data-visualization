@@ -306,21 +306,20 @@ function RoadGraphComponent({ map, center }) {
         // CylinderGeometry(0.05, 0.05, 2.2) default center at (0,0,0) (so -1.1 to 1.1)
         // Rotate X 90 -> Vertical (Z-up).
         // Translate Z +1.1 -> Base at 0, Top at 2.2.
-        const poleGeo = new THREE.CylinderGeometry(0.05, 0.05, 2.2, 8);
+        // 1. Create Pole Geometry
+        // Vertical Cylinder. Radius 0.05m, Height 3m.
+        // Assumes data point is at the sign (elevated). Extend pole down.
+        // Rotate X 90 -> Vertical (Z-up).
+        // Range [-1.5, 1.5] -> Translate Z -1.5 -> [-3.0, 0]
+        const poleGeo = new THREE.CylinderGeometry(0.05, 0.05, 3.0, 8);
         poleGeo.rotateX(Math.PI / 2);
-        poleGeo.translate(0, 0, 1.1);
+        poleGeo.translate(0, 0, -1.5);
 
         // 2. Create Sign Geometry (Octagon)
-        // Radius 0.4m, Thickness 0.05m.
-        // Vertical Face pointing +X (So that Yaw rotation works)
-        // CylinderGeometry(0.4, 0.4, 0.05, 8). Axis Y.
-        // Rotate Z 90 -> Axis X (Horizontal). Faces are YZ planes. Normal is X.
-        // Wait, if I rotate Z 90, the axis becomes X.
-        // The "Top" face (Octagon) normal is +X.
-        // Position: Top of pole. Z = 2.4.
+        // Position at Z=0 (The data point)
         const signGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.05, 8);
         signGeo.rotateZ(Math.PI / 2);
-        signGeo.translate(0, 0, 2.4);
+        // signGeo.translate(0, 0, 0); // Centered at data point
 
         // 3. Merge geometries with groups
         const mergedGeo = BufferGeometryUtils.mergeGeometries([poleGeo, signGeo], false);
