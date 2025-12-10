@@ -726,7 +726,7 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
 
             {(() => {
                  const isAuto = new URLSearchParams(window.location.search).get('autoCamera') !== 'false';
-                 return parsedMap && <CameraRig map={parsedMap} frameRef={frameRef} center={center} variant={variant} isAuto={isAuto} onCameraChange={setCameraName} />;
+                 return parsedMap && <CameraRig map={parsedMap} agents={parsedAgents} frameRef={frameRef} center={center} variant={variant} isAuto={isAuto} onCameraChange={setCameraName} />;
             })()}
         </Canvas>
         

@@ -27,7 +27,7 @@ const BASE_MODES = [
     { name: 'Top Down (Static)', type: 'static_top', height: 40, weight: 8 },
 ];
 
-export function CameraRig({ map, frameRef, center, variant, isAuto = true, onCameraChange }) {
+export function CameraRig({ map, agents, frameRef, center, variant, isAuto = true, onCameraChange }) {
     const { camera } = useThree();
     
     // 1. Analyze Scenario (SDC + Pedestrians)
@@ -54,14 +54,6 @@ export function CameraRig({ map, frameRef, center, variant, isAuto = true, onCam
          const sdcSpeed = currSpeeds[sdcIndex] || 0; 
          const isStopped = sdcSpeed < 2.0;
 
-         const types = getVal('state/type');
-         const pedestrianIndices = [];
-         if (types) {
-             types.forEach((t, idx) => {
-                 if (t === 2) pedestrianIndices.push(idx); 
-             });
-         }
-         
          // Get initial position for Fixed cameras?
          // We can extract SDC start pos here if needed.
          const startX = getVal('state/current/x')[sdcIndex] || 0;
@@ -72,24 +64,173 @@ export function CameraRig({ map, frameRef, center, variant, isAuto = true, onCam
              sdcIndex,
              count,
              isStopped,
-             pedestrianIndices,
              sdcStart: [startX, startY]
          };
     }, [map]); 
 
+    // Helper: Line Segment Intersection with Rotated Rectangle
+    const intersectLineRect = (p1, p2, rect) => {
+         // rect: { x, y, width, length, yaw }
+         // Transform p1, p2 to rect local space
+         const cos = Math.cos(-rect.yaw);
+         const sin = Math.sin(-rect.yaw);
+
+         const transform = (p) => {
+             const dx = p.x - rect.x;
+             const dy = p.y - rect.y;
+             return {
+                 x: dx * cos - dy * sin,
+                 y: dx * sin + dy * cos
+             };
+         };
+
+         const lp1 = transform(p1);
+         const lp2 = transform(p2);
+
+         // Axis Aligned Rect check (centered at 0,0)
+         const halfW = rect.width / 2;
+         const halfL = rect.length / 2;
+
+         // Cohen-Sutherland like bit codes or Liang-Barsky
+         // Simple separation axis or checking intersection with 4 lines
+         // Since we just need boolean, let's use a simpler check:
+         // Does the line segment intersect the AABB defined by [-halfL, halfL] x [-halfW, halfW]?
+         // Note: width is usually y-axis in vehicle frame, length is x-axis.
+         // Let's assume standard vehicle frame: x is forward (length), y is left (width).
+
+         const minX = -halfL, maxX = halfL;
+         const minY = -halfW, maxY = halfW;
+
+         // Check if either point is inside (occlusion implies strict blocking usually,
+         // but if point is inside, it's definitely occluded or intersecting)
+         if ((lp1.x >= minX && lp1.x <= maxX && lp1.y >= minY && lp1.y <= maxY) ||
+             (lp2.x >= minX && lp2.x <= maxX && lp2.y >= minY && lp2.y <= maxY)) {
+             return true;
+         }
+
+         // Liang-Barsky
+         let t0 = 0, t1 = 1;
+         const dx = lp2.x - lp1.x;
+         const dy = lp2.y - lp1.y;
+
+         const p = [-dx, dx, -dy, dy];
+         const q = [lp1.x - minX, maxX - lp1.x, lp1.y - minY, maxY - lp1.y];
+
+         for(let i=0; i<4; i++) {
+             if (p[i] === 0) {
+                 if (q[i] < 0) return false; // Parallel and outside
+             } else {
+                 const t = q[i] / p[i];
+                 if (p[i] < 0) {
+                     if (t > t1) return false;
+                     if (t > t0) t0 = t;
+                 } else {
+                     if (t < t0) return false;
+                     if (t < t1) t1 = t;
+                 }
+             }
+         }
+
+         return t0 <= t1;
+    };
+
     // 2. Select Mode
     const activeMode = useMemo(() => {
-        if (!scenarioData) return BASE_MODES[0];
+        if (!scenarioData || !agents) return BASE_MODES[0];
 
         let availableModes = [...BASE_MODES];
         
-        if (scenarioData.isStopped && scenarioData.pedestrianIndices.length > 0) {
-            for(let i=0; i<3; i++) {
-                availableModes.push({ 
+        // Find SDC agent
+        const sdcAgent = agents.find(a => a.isSdc);
+        const pedestrians = agents.filter(a => a.type === 2);
+        const obstacles = agents.filter(a => !a.isSdc && a.type === 1); // Vehicles only as occluders?
+
+        if (sdcAgent && pedestrians.length > 0) {
+            const validPedestrians = [];
+
+            pedestrians.forEach(ped => {
+                 let visibleFrames = 0;
+                 const totalFrames = ped.trajectory.length;
+                 if (totalFrames === 0) return;
+
+                 // Check visibility for every frame (or strided)
+                 // Stride for performance
+                 const stride = 5;
+                 let checkedCount = 0;
+
+                 for(let t=0; t<totalFrames; t+=stride) {
+                      checkedCount++;
+
+                      const pedPos = ped.trajectory[t];
+                      const sdcPos = sdcAgent.trajectory[t];
+
+                      if (!pedPos || !sdcPos) continue; // Mismatch length
+
+                      // Check occlusion against all obstacles
+                      let occluded = false;
+                      for (const obs of obstacles) {
+                          const obsPos = obs.trajectory[t];
+                          if (!obsPos) continue;
+
+                          // Simple distance check first
+                          const dist = Math.sqrt((obsPos.x - pedPos.x)**2 + (obsPos.y - pedPos.y)**2);
+                          if (dist > 50) continue; // Too far to occlude
+
+                          if (intersectLineRect(pedPos, sdcPos, {
+                              x: obsPos.x,
+                              y: obsPos.y,
+                              width: obs.dims[1], // width
+                              length: obs.dims[0], // length
+                              yaw: obsPos.yaw
+                          })) {
+                              occluded = true;
+                              break;
+                          }
+                      }
+
+                      if (!occluded) visibleFrames++;
+                 }
+
+                 const visibility = visibleFrames / checkedCount;
+                 if (visibility >= 0.9) {
+                     validPedestrians.push(ped);
+                 }
+            });
+
+            // Add modes for valid pedestrians
+            // Limit to max 3 to avoid clutter? Or just all valid?
+            // Previous code used modulo to pick from indices.
+            // Let's take up to 3 valid ones.
+            for (let i = 0; i < Math.min(3, validPedestrians.length); i++) {
+                 // Find original index if needed, but we can pass object if we refactor.
+                 // Current logic expects targetIndex which is index in agents arrays?
+                 // Wait, scenarioData.pedestrianIndices were indices in the raw arrays (0..count-1).
+                 // My parsed agents have `id`.
+                 // But `parseAgent` inside `trajectories` useMemo uses `map.get`.
+                 // So we need the original index.
+
+                 // Reverse lookup index from id?
+                 // agents array is built iterating 0..count-1.
+                 // So I need to know the index 'i' from the agents loop.
+                 // I didn't save the index in parsedAgents.
+
+                 // Quick fix: parsedAgents array order matches raw order?
+                 // In Scene.jsx: for (let i = 0; i < count; i++) { agents.push(...) }
+                 // Yes, it matches. So I can find the index in `agents` array and use that?
+                 // No, `parseAgent` uses `agentIndex` to index into valueLists.
+                 // So `targetIndex` MUST be the index in the raw arrays.
+                 // Since `agents` is 1:1 with raw arrays (filtered? No, looks like it pushes for every i).
+                 // "if (count === 0) return []; ... for (let i = 0; i < count; i++)"
+                 // Yes, `agents` array indices correspond exactly to raw data indices.
+
+                 const ped = validPedestrians[i];
+                 const idx = agents.indexOf(ped); // This is the index.
+
+                 availableModes.push({
                     name: 'Pedestrian POV', 
                     type: 'pedestrian', 
-                    targetIndex: scenarioData.pedestrianIndices[i % scenarioData.pedestrianIndices.length],
-                    weight: 5 // Medium priority for interesting event
+                    targetIndex: idx,
+                    weight: 2 // Reduced priority (was 5)
                 });
             }
         }
@@ -135,7 +276,7 @@ export function CameraRig({ map, frameRef, center, variant, isAuto = true, onCam
         }
 
         return selected;
-    }, [scenarioData, variant]);
+    }, [scenarioData, agents, variant]);
 
     // 3. Notify Parent of Camera Name change
     useEffect(() => {
