@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { calculateStopSignYaw } from '../utils/math';
 import { Crosswalks } from './Crosswalks';
 
 // Standard lane width in meters
@@ -347,7 +348,7 @@ function RoadGraphComponent({ map, center }) {
             // Orientation
             if (sign.dir) {
                 // Calculate Yaw from dir
-                const yaw = Math.atan2(sign.dir.y, sign.dir.x);
+                const yaw = calculateStopSignYaw(sign.dir.x, sign.dir.y);
                 // Rotate around Z axis (which is up)
                 dummy.rotation.set(0, 0, yaw);
             } else {
