@@ -4,15 +4,16 @@ import * as THREE from 'three';
 export function WaymoCar({ dims = [4.68, 2.0, 1.56], isBraking = false }) {
     // Default Waymo I-Pace dimensions: L: 4.68, W: 2.0, H: 1.56
     const [length, width, height] = dims;
+    const wheelRadius = 0.60; // Requested big wheels
 
     const { bodyGeom, glassGeom, roofGeom } = useMemo(() => {
         const halfL = length / 2;
-        const groundClearance = 0.25;
+        const groundClearance = 0.32; // Lifted for 0.6m wheels
         const wheelBase = length * 0.6;
         const wheelPosFwd = wheelBase / 2;
         const wheelPosRear = -wheelBase / 2;
-        const wheelRadius = 0.38;
-        const wellRadius = wheelRadius * 1.15;
+        // wheelRadius is now from outer scope
+        const wellRadius = wheelRadius * 1.1; // Clearance
         const beltLine = height * 0.6; // Where glass starts
 
         // --- 1. Main Body Shape (Side Profile) ---
@@ -146,7 +147,7 @@ export function WaymoCar({ dims = [4.68, 2.0, 1.56], isBraking = false }) {
             roofGeom: new THREE.ExtrudeGeometry(glassShape, { ...glassExtrude, depth: cabinWidth + 0.02 }),
         };
 
-    }, [length, width, height]);
+    }, [length, width, height, wheelRadius]);
 
     // Target for headlights
     const [headlightTarget] = useState(() => {
@@ -156,7 +157,7 @@ export function WaymoCar({ dims = [4.68, 2.0, 1.56], isBraking = false }) {
     });
 
     return (
-        <group>
+        <group position={[0, 0, -height / 2]}>
             {/* Shadow Blob */}
             <mesh position={[0, 0, 0.02]}>
                 <planeGeometry args={[length * 1.1, width * 1.1]} />
@@ -203,13 +204,13 @@ export function WaymoCar({ dims = [4.68, 2.0, 1.56], isBraking = false }) {
             {/* Details that don't need complex rotation */}
 
             {/* Wheels */}
-             <DetailedWheel position={[length * 0.36, width * 0.45, 0.38]} radius={0.38} side="left" />
-             <DetailedWheel position={[length * 0.36, -width * 0.45, 0.38]} radius={0.38} side="right" />
-             <DetailedWheel position={[-length * 0.36, width * 0.45, 0.38]} radius={0.38} side="left" />
-             <DetailedWheel position={[-length * 0.36, -width * 0.45, 0.38]} radius={0.38} side="right" />
+             <DetailedWheel position={[length * 0.3, width * 0.45, wheelRadius]} radius={wheelRadius} side="left" />
+             <DetailedWheel position={[length * 0.3, -width * 0.45, wheelRadius]} radius={wheelRadius} side="right" />
+             <DetailedWheel position={[-length * 0.3, width * 0.45, wheelRadius]} radius={wheelRadius} side="left" />
+             <DetailedWheel position={[-length * 0.3, -width * 0.45, wheelRadius]} radius={wheelRadius} side="right" />
 
             {/* Lights */}
-            <group position={[length/2 - 0.15, 0, height * 0.55]}>
+            <group position={[length/2 - 0.05, 0, height * 0.42]}>
                 <CarLight position={[0, width * 0.35, 0]} color="#E0E0FF" type="head" target={headlightTarget} />
                 <CarLight position={[0, -width * 0.35, 0]} color="#E0E0FF" type="head" target={headlightTarget} />
                 {/* Grill Strip */}
@@ -225,7 +226,7 @@ export function WaymoCar({ dims = [4.68, 2.0, 1.56], isBraking = false }) {
             </group>
 
             {/* Taillights */}
-             <group position={[-length/2 + 0.1, 0, height * 0.65]}>
+             <group position={[-length/2 - 0.05, 0, height * 0.55]} rotation={[0, Math.PI, 0]}>
                 <CarLight position={[0, width * 0.35, 0]} color="#FF0000" type="tail" isBraking={isBraking} />
                 <CarLight position={[0, -width * 0.35, 0]} color="#FF0000" type="tail" isBraking={isBraking} />
                 {/* Light Bar */}
@@ -248,44 +249,60 @@ function DetailedWheel({ position, radius, side }) {
     const width = 0.28;
     const rimRadius = radius * 0.65;
 
-    const wheelRot = [Math.PI/2, 0, 0]; // Standard for Torus
+    // Wheel Geometry Alignment:
+    // Car moves in X. Axle is Y.
+    // Torus (Tire) needs to be in XZ plane -> Rotate X 90.
+    // Cylinder (Tread/Rim) defaults to Y axis alignment -> No Rotation.
+    
+    // Side Correction:
+    // Left Wheel (Pos Y): Faces +Y.
+    // Right Wheel (Neg Y): Faces -Y.
+    // To flip Y axis direction, we rotate 180 around X (Y->-Y, Z->-Z). 
+    // This keeps the wheel rolling forward (X->X).
+
+    const isRight = side === 'right';
 
     return (
-        <group position={position} rotation={side === 'right' ? [0, Math.PI, 0] : [0, 0, 0]}>
-            {/* Tire (Torus) */}
-             <mesh rotation={wheelRot}>
+        <group position={position} rotation={isRight ? [Math.PI, 0, 0] : [0, 0, 0]}>
+            {/* Tire (Torus) - XZ Plane */}
+             <mesh rotation={[Math.PI/2, 0, 0]}>
                 <torusGeometry args={[radius - 0.06, 0.06, 16, 48]} />
                 <meshStandardMaterial color="#1a1a1a" roughness={0.8} />
             </mesh>
 
-            {/* Tire Tread (Cylinder) */}
-            <mesh rotation={[0, 0, 0]}>
+            {/* Tire Tread (Cylinder) - Y Axis */}
+            <mesh>
                  <cylinderGeometry args={[radius - 0.02, radius - 0.02, width - 0.05, 32]} />
                  <meshStandardMaterial color="#1a1a1a" roughness={0.9} />
             </mesh>
 
-            {/* Rim (Cylinder) */}
-            <mesh rotation={[0, 0, 0]}>
+            {/* Rim (Cylinder) - Y Axis */}
+            <mesh>
                 <cylinderGeometry args={[rimRadius, rimRadius, width * 0.6, 32]} />
                 <meshStandardMaterial color="#ccc" metalness={0.7} roughness={0.2} />
             </mesh>
 
-            {/* Spokes (Box Cross) */}
-            <group rotation={[Math.PI/2, 0, 0]}>
+            {/* Spokes (Box Cross) - XZ Plane */}
+            {/* We want the cross to be on the Face (XZ plane). */}
+            {/* And offset slightly in Y to be on the outside. */}
+            <group position={[0, width * 0.2, 0]}>
+                 {/* Horizontal Spoke (Along X) */}
                  <mesh>
                      <boxGeometry args={[rimRadius*1.8, 0.05, 0.02]} />
                      <meshStandardMaterial color="#888" metalness={0.8} />
                  </mesh>
+                 {/* Vertical Spoke (Along Z) */}
                  <mesh rotation={[0, Math.PI/2, 0]}>
                      <boxGeometry args={[rimRadius*1.8, 0.05, 0.02]} />
                      <meshStandardMaterial color="#888" metalness={0.8} />
                  </mesh>
-                 {/* Hub Cap */}
-                 <mesh position={[0, width*0.32 * (side==='left'?1:-1), 0]}>
-                     <cylinderGeometry args={[0.05, 0.05, 0.02, 16]} />
-                     <meshStandardMaterial color="#000" />
-                 </mesh>
             </group>
+
+             {/* Hub Cap - Center of Face */}
+             <mesh position={[0, width * 0.25, 0]} rotation={[Math.PI/2, 0, 0]}>
+                 <cylinderGeometry args={[0.05, 0.05, 0.02, 16]} />
+                 <meshStandardMaterial color="#000" />
+             </mesh>
         </group>
     )
 }
@@ -339,27 +356,27 @@ function SensorSuite({ position }) {
                  <meshStandardMaterial color="#ddd" />
              </mesh>
              {/* Main Dome (Waymo Driver) */}
-             <mesh position={[0, 0, 0.25]}>
+             <mesh position={[0, 0, 0.25]} rotation={[Math.PI/2, 0, 0]}>
                   <cylinderGeometry args={[0.12, 0.14, 0.35, 32]} />
                   <meshStandardMaterial color="#111" metalness={0.8} roughness={0.1} />
              </mesh>
              {/* Spinning LiDAR Graphic (Static but styled) */}
-             <mesh position={[0, 0, 0.35]}>
+             <mesh position={[0, 0, 0.35]} rotation={[Math.PI/2, 0, 0]}>
                  <cylinderGeometry args={[0.125, 0.125, 0.1, 32]} />
                   <meshStandardMaterial color="#222" metalness={0.5} />
                   {/* We could animate rotation here if we had ref */}
              </mesh>
-             <mesh position={[0, 0, 0.41]}>
+             <mesh position={[0, 0, 0.41]} rotation={[Math.PI/2, 0, 0]}>
                  <cylinderGeometry args={[0.13, 0.13, 0.01, 32]} />
                  <meshStandardMaterial color="#444" />
              </mesh>
 
              {/* Side Pucks on Roof Rack */}
-             <mesh position={[-0.1, 0.25, 0.1]}>
+             <mesh position={[-0.1, 0.25, 0.1]} rotation={[Math.PI/2, 0, 0]}>
                   <cylinderGeometry args={[0.06, 0.07, 0.15, 16]} />
                   <meshStandardMaterial color="#111" />
              </mesh>
-             <mesh position={[-0.1, -0.25, 0.1]}>
+             <mesh position={[-0.1, -0.25, 0.1]} rotation={[Math.PI/2, 0, 0]}>
                   <cylinderGeometry args={[0.06, 0.07, 0.15, 16]} />
                   <meshStandardMaterial color="#111" />
              </mesh>
