@@ -10,6 +10,8 @@ import { TrafficLights } from './components/TrafficLights';
 import { PathSamples } from './components/PathSamples';
 import { SdcPathHighlight } from './components/SdcPathHighlight';
 import { TrafficLightHighlight } from './components/TrafficLightHighlight';
+import { AgentTrajectories } from './components/AgentTrajectories';
+import { Rain } from './components/Rain';
 
 export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
   // Removed frame state to prevent full scene re-renders
@@ -646,9 +648,16 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
             {parsedMap && <RoadGraph map={parsedMap} center={center} />}
             {parsedMap && <SdcPathHighlight sdcState={parsedSdcState} frameRef={frameRef} />}
             {parsedPathSamples && <PathSamples vertices={parsedPathSamples} />}
+
+            {/* New Information Layer: Agent Trajectories */}
+            {parsedMap && <AgentTrajectories agents={parsedAgents} frameRef={frameRef} />}
+
             {parsedMap && <Agents agents={parsedAgents} trafficLights={parsedTrafficLights} frameRef={frameRef} />} 
             {parsedTrafficLights && <TrafficLights key="traffic-lights-spheres" trafficLights={parsedTrafficLights} frameRef={frameRef} />}
             
+            {/* New Visual Layer: Rain */}
+            <Rain />
+
             {(() => {
                  const isAuto = new URLSearchParams(window.location.search).get('autoCamera') !== 'false';
                  return parsedMap && <CameraRig map={parsedMap} frameRef={frameRef} center={center} variant={variant} isAuto={isAuto} onCameraChange={setCameraName} />;
