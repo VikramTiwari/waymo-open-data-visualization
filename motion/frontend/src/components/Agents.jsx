@@ -666,16 +666,18 @@ function AgentItem({ agent, trafficLights, frameRef }) {
                 )}
              </group>
              {/* Velocity Arrow - Elevated */}
-             <group ref={arrowRef} visible={false} position={[0, 0, 2.5]}>
-                 <mesh position={[0.5, 0, 0]}>
-                     <boxGeometry args={[1, 0.1, 0.1]} />
-                     <meshBasicMaterial color={agent.isSdc ? "#00FFFF" : "#999"} opacity={agent.isSdc ? 1 : 0.8} transparent={!agent.isSdc} />
-                 </mesh>
-                 <mesh position={[1, 0, 0]} rotation={[0, 0, -Math.PI / 2]}>
-                     <coneGeometry args={[0.2, 0.5, 8]} />
-                     <meshBasicMaterial color={agent.isSdc ? "#00FFFF" : "#999"} opacity={agent.isSdc ? 1 : 0.8} transparent={!agent.isSdc} />
-                 </mesh>
-             </group>
+             {!agent.isSdc && (
+                 <group ref={arrowRef} visible={false} position={[0, 0, 2.5]}>
+                     <mesh position={[0.5, 0, 0]}>
+                         <boxGeometry args={[1, 0.1, 0.1]} />
+                         <meshBasicMaterial color="#999" opacity={0.8} transparent={true} />
+                     </mesh>
+                     <mesh position={[1, 0, 0]} rotation={[0, 0, -Math.PI / 2]}>
+                         <coneGeometry args={[0.2, 0.5, 8]} />
+                         <meshBasicMaterial color="#999" opacity={0.8} transparent={true} />
+                     </mesh>
+                 </group>
+             )}
              
 
 
