@@ -129,20 +129,7 @@ function createCyclistGeometries() {
 const PED_GEOS = createPedestrianGeometries();
 const CYC_GEOS = createCyclistGeometries();
 
-// Arrow Geometry for Instancing (Merged Box + Cone, facing +X)
-function createArrowGeometry() {
-    // Shaft (Box)
-    const shaft = new THREE.BoxGeometry(1, 0.08, 0.08);
-    shaft.translate(0.5, 0, 0); // 0 to 1
-    
-    // Head (Cone)
-    const head = new THREE.ConeGeometry(0.15, 0.4, 8);
-    head.rotateZ(-Math.PI / 2); // Point to +X
-    head.translate(1.2, 0, 0); // slightly after shaft end
-    
-    return BufferGeometryUtils.mergeGeometries([shaft, head]);
-}
-const ARROW_GEO = createArrowGeometry();
+
 
 const wireframeShaderHandler = (shader) => {
     shader.vertexShader = `
@@ -251,7 +238,7 @@ export function Agents({ agents, trafficLights, frameRef }) {
 
     // ... (refs - no change) ...
     const vehicleMeshRef = useRef();
-    const vehicleArrowRef = useRef(); 
+ 
     const vehicleWireframeRef = useRef();
     const vehicleBrakeLightRef = useRef();
     // Peds Refs
@@ -336,7 +323,7 @@ export function Agents({ agents, trafficLights, frameRef }) {
                      TEMP_OBJECT.scale.set(0,0,0);
                      TEMP_OBJECT.updateMatrix();
                      vehicleMeshRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
-                     if (vehicleArrowRef.current) vehicleArrowRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
+
                      if (vehicleWireframeRef.current) vehicleWireframeRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
                      return;
                  }
@@ -362,25 +349,7 @@ export function Agents({ agents, trafficLights, frameRef }) {
                      vehicleWireframeRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
                  }
 
-                 // Update Vehicle Arrow
-                 if (vehicleArrowRef.current) {
-                     const speed = Math.sqrt(st.vx*st.vx + st.vy*st.vy);
-                     if (speed > 0.5 && !agent.isParked) {
-                         const arrowYaw = Math.atan2(st.vy, st.vx);
-                         TEMP_OBJECT.position.set(st.x, st.y, st.z + 2.5); // Elevate 2.5m above ground
-                         TEMP_OBJECT.rotation.set(0, 0, arrowYaw);
-                         // Scale length by speed, clamp min
-                         const len = Math.max(speed * 0.5, 1.0);
-                         TEMP_OBJECT.scale.set(len, 1, 1);
-                         TEMP_OBJECT.updateMatrix();
-                         vehicleArrowRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
-                     } else {
-                         // Hide
-                         TEMP_OBJECT.scale.set(0,0,0);
-                         TEMP_OBJECT.updateMatrix();
-                         vehicleArrowRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
-                     }
-                 }
+
 
                  // Update Brake Lights
                  if (vehicleBrakeLightRef.current) {
@@ -422,9 +391,7 @@ export function Agents({ agents, trafficLights, frameRef }) {
              });
              vehicleMeshRef.current.instanceMatrix.needsUpdate = true;
              if(vehicleMeshRef.current.instanceColor) vehicleMeshRef.current.instanceColor.needsUpdate = true;
-             if (vehicleArrowRef.current) {
-                 vehicleArrowRef.current.instanceMatrix.needsUpdate = true;
-             }
+
              if (vehicleWireframeRef.current) {
                  vehicleWireframeRef.current.instanceMatrix.needsUpdate = true;
              }
@@ -518,10 +485,7 @@ export function Agents({ agents, trafficLights, frameRef }) {
                             color="#ffffff"
                         />
                     </instancedMesh>
-                    {/* Instanced Arrows for Vehicles - Muted Color but visible */}
-                    <instancedMesh ref={vehicleArrowRef} args={[ARROW_GEO, null, vehicles.length]} frustumCulled={false}>
-                         <meshBasicMaterial color="#999" transparent opacity={0.5} />
-                    </instancedMesh>
+
                     {/* Confidence Wireframe Shell */}
                     <instancedMesh ref={vehicleWireframeRef} args={[BOX_GEO_BOTTOM, null, vehicles.length]} frustumCulled={false}>
                         <meshBasicMaterial 
@@ -588,7 +552,7 @@ export function Agents({ agents, trafficLights, frameRef }) {
 
 function AgentItem({ agent, trafficLights, frameRef }) {
     const groupRef = useRef();
-    const arrowRef = useRef();
+
     const bodyRef = useRef();
 
 
@@ -639,16 +603,7 @@ function AgentItem({ agent, trafficLights, frameRef }) {
         const brakingNow = accel < -1.0;
         if (brakingNow !== isBraking) setIsBraking(brakingNow);
 
-        if (arrowRef.current) {
-            if (speed > 0.5) {
-                arrowRef.current.visible = true;
-                const arrowYaw = Math.atan2(vy, vx);
-                arrowRef.current.rotation.set(0, 0, arrowYaw);
-                arrowRef.current.scale.set(Math.max(speed * 0.5, 1), 1, 1);
-            } else {
-                arrowRef.current.visible = false;
-            }
-        }
+
         
     });
 
@@ -665,19 +620,7 @@ function AgentItem({ agent, trafficLights, frameRef }) {
                     </mesh>
                 )}
              </group>
-             {/* Velocity Arrow - Elevated */}
-             {!agent.isSdc && (
-                 <group ref={arrowRef} visible={false} position={[0, 0, 2.5]}>
-                     <mesh position={[0.5, 0, 0]}>
-                         <boxGeometry args={[1, 0.1, 0.1]} />
-                         <meshBasicMaterial color="#999" opacity={0.8} transparent={true} />
-                     </mesh>
-                     <mesh position={[1, 0, 0]} rotation={[0, 0, -Math.PI / 2]}>
-                         <coneGeometry args={[0.2, 0.5, 8]} />
-                         <meshBasicMaterial color="#999" opacity={0.8} transparent={true} />
-                     </mesh>
-                 </group>
-             )}
+
              
 
 
