@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { ENVS } from "./constants/environments";
+import { EnvironmentPreloader } from "./components/EnvironmentPreloader";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Environment, ContactShadows } from "@react-three/drei";
 import { EffectComposer, Bloom } from "@react-three/postprocessing";
@@ -660,28 +662,7 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
   const [envName, setEnvName] = useState("night");
   const [weather, setWeather] = useState("clear"); // clear, rain, snow, fog, dust, storm
 
-  const ENVS = useMemo(
-    () => ({
-      night: "/dikhololo_night_1k.hdr?v=1",
-      city: "/potsdamer_platz_1k.hdr?v=1",
-      town: "/blaubeuren_night_1k.hdr",
-      rooftop: "/rooftop_night_1k.hdr",
-      dark: "/moonless_golf_1k.hdr",
-      // New Requested Options
-      shanghai: "/shanghai_bund_1k.hdr",
-      rogland: "/rogland_clear_night_1k.hdr",
-      studio: "/studio_small_09_1k.hdr",
-      sunrise: "/spruit_sunrise_1k.hdr",
-      street: "/urban_street_01_1k.hdr",
-      // Additional Options
-      garage: "/autoshop_01_1k.hdr",
-      parking: "/parking_garage_1k.hdr",
-      sunset: "/venice_sunset_1k.hdr",
-      bridge: "/adams_place_bridge_1k.hdr",
-      market: "/leadenhall_market_1k.hdr",
-    }),
-    []
-  );
+
 
   // Auto-select random environment and weather on data load
   useEffect(() => {
@@ -697,7 +678,7 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
     } else {
       setWeather("clear");
     }
-  }, [data, ENVS]);
+  }, [data]);
 
   return (
     <div
@@ -712,6 +693,7 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
         camera={{ position: [0, -20, 20], fov: 45, up: [0, 0, 1] }}
         shadows
       >
+        <EnvironmentPreloader />
         <color attach="background" args={["#050505"]} />
         <ambientLight intensity={0.1} /> {/* Darker ambient */}
         <directionalLight
