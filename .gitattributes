@@ -1,0 +1,31 @@
+# Auto-detect text files and perform LF normalization
+* text=auto
+
+# Custom boolean attributes
+*.js text
+*.jsx text
+*.ts text
+*.tsx text
+*.json text
+*.css text
+*.md text
+
+# Binary files
+*.hdr binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.svg text
+*.glb binary
+*.gltf text
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.mp4 binary
+*.mov binary
+*.webm binary
+*.mp3 binary
+*.wav binary
