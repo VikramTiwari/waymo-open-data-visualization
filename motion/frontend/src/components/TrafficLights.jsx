@@ -45,8 +45,6 @@ export function TrafficLights({ trafficLights, frameRef }) {
     useFrame(() => {
         if (!frameRef || !redRef.current || trafficLights.length === 0) return;
 
-        const currentFrame = frameRef.current;
-        
         trafficLights.forEach((light, i) => {
             // Use current state (11th step, index 10) for static color as requested.
             // "stay the same color and not be blinking"
@@ -95,13 +93,6 @@ export function TrafficLights({ trafficLights, frameRef }) {
 
     // Geometries
     const geometries = React.useMemo(() => {
-        // Dimensions
-        const w = 0.5; // width
-        const d = 0.5; // depth
-        const h = 1.5; // height
-
-        // Housing (Box)
-        const housing = new THREE.BoxGeometry(w, d, h);
         // Center of box is 0,0,0. Lights will be offset relative to this.
         // We want the whole group pivot to be at the center or bottom?
         // Let's keep pivot at center of housing for rotation simplicity.
