@@ -2,7 +2,54 @@ import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 
-// Simple LCG (same as Rain)
+const vertexShader = `
+  uniform float uTime;
+  uniform float uHeight;
+
+  attribute vec3 aVelocity; // x=speed, y=driftPhase, z=driftSpeed
+
+  void main() {
+    float fallSpeed = aVelocity.x;
+    float phase = aVelocity.y;
+    float driftRate = aVelocity.z;
+
+    // Fall Logic
+    float fallDist = uTime * fallSpeed;
+    float currentZ = position.z - fallDist;
+    float finalZ = mod(currentZ, uHeight);
+
+    // Sway Logic
+    float swayX = sin(uTime * driftRate + phase) * 2.0;
+    float swayY = cos(uTime * driftRate + phase) * 2.0;
+
+    vec3 transformed = vec3(
+        position.x + swayX,
+        position.y + swayY,
+        finalZ
+    );
+
+    vec4 mvPosition = modelViewMatrix * vec4(transformed, 1.0);
+    gl_Position = projectionMatrix * mvPosition;
+
+    gl_PointSize = 4.0; // Fixed size in pixels, or attenuate
+    // Size attenuation approximation
+    gl_PointSize *= (20.0 / -mvPosition.z);
+  }
+`;
+
+const fragmentShader = `
+  uniform vec3 uColor;
+  uniform float uOpacity;
+
+  void main() {
+    // Round particles
+    vec2 coord = gl_PointCoord - vec2(0.5);
+    if(length(coord) > 0.5) discard;
+
+    gl_FragColor = vec4(uColor, uOpacity);
+  }
+`;
+
 function mulberry32(a) {
     return function() {
       var t = a += 0x6D2B79F5;
@@ -13,14 +60,14 @@ function mulberry32(a) {
 }
 
 export function Snow({ count = 5000 }) {
-    const meshRef = useRef();
+    const materialRef = useRef();
+    const height = 50;
 
-    const pointsGeometry = useMemo(() => {
-        const rand = mulberry32(54321); // Different seed
+    const geometry = useMemo(() => {
+        const rand = mulberry32(54321);
         const positions = [];
-        const velocities = []; // Store custom velocity data: [speed, driftX, driftY]
+        const velocities = [];
         const range = 100;
-        const height = 50;
 
         for(let i=0; i<count; i++) {
              const x = (rand() - 0.5) * range;
@@ -29,12 +76,11 @@ export function Snow({ count = 5000 }) {
 
              positions.push(x, y, z);
              
-             // Speed (slower than rain), Drift Amplitude
-             // stored as: fallSpeed, driftOffset, driftSpeed
+             // [speed, driftPhase, driftRate]
              velocities.push(
-                 2 + rand() * 3,     // fall speed (2-5 m/s)
-                 rand() * Math.PI * 2, // random starting phase
-                 0.5 + rand() * 1.0   // drift speed
+                 2 + rand() * 3,      // fall speed
+                 rand() * Math.PI * 2,// phase
+                 0.5 + rand() * 1.0   // drift rate
              );
         }
 
@@ -44,53 +90,26 @@ export function Snow({ count = 5000 }) {
         return geo;
     }, [count]);
 
-    // Update Loop
-    useFrame((state, delta) => {
-        if (!meshRef.current) return;
-
-        const posAttr = meshRef.current.geometry.attributes.position;
-        const velAttr = meshRef.current.geometry.attributes.aVelocity;
-        const count = posAttr.count;
-        
-        const time = state.clock.elapsedTime;
-
-        for (let i = 0; i < count; i++) {
-            let z = posAttr.getZ(i);
-            let x = posAttr.getX(i);
-            let y = posAttr.getY(i);
-            
-            const fallSpeed = velAttr.getX(i);
-            const phase = velAttr.getY(i);
-            const driftRate = velAttr.getZ(i);
-
-            // Falling
-            z -= fallSpeed * delta;
-
-            // Drifting (gentle sway)
-            x += Math.sin(time * driftRate + phase) * 2 * delta;
-            y += Math.cos(time * driftRate + phase) * 2 * delta;
-
-            // Reset if below ground
-            if (z < 0) {
-                 z = 40 + Math.random() * 10;
-                 // Reset XY to stay within range somewhat? 
-                 // Actually, let them drift. If they drift too far out, maybe reset?
-                 // For now, simple Z reset is fine for the camera view.
-            }
-
-            posAttr.setXYZ(i, x, y, z);
+    useFrame((state) => {
+        if (materialRef.current) {
+            materialRef.current.uniforms.uTime.value = state.clock.elapsedTime;
         }
-        posAttr.needsUpdate = true;
     });
 
     return (
-        <points ref={meshRef} geometry={pointsGeometry}>
-            <pointsMaterial 
-                color="#ffffff" 
-                size={0.15} 
-                transparent 
-                opacity={0.8} 
-                depthWrite={false} 
+        <points geometry={geometry}>
+            <shaderMaterial
+                ref={materialRef}
+                vertexShader={vertexShader}
+                fragmentShader={fragmentShader}
+                uniforms={{
+                    uTime: { value: 0 },
+                    uHeight: { value: height },
+                    uColor: { value: new THREE.Color('#ffffff') },
+                    uOpacity: { value: 0.8 }
+                }}
+                transparent={true}
+                depthWrite={false}
                 blending={THREE.AdditiveBlending}
             />
         </points>

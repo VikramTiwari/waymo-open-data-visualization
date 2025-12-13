@@ -193,6 +193,11 @@ const GENERIC_CAR_GEO = createGenericCarGeometry();
 const BOX_GEO_BOTTOM = new THREE.BoxGeometry(1, 1, 1);
 BOX_GEO_BOTTOM.translate(0, 0, 0.5);
 
+// Standard box for "Others" (Unknown/Signs) - Unit cube centered at 0.5z
+const GENERIC_BOX_GEO = new THREE.BoxGeometry(1, 1, 1);
+GENERIC_BOX_GEO.translate(0, 0, 0.5);
+
+
 // Brake Lights Geometry (Two small boxes at the rear)
 function createBrakeLightGeometry() {
     // Relative to a 1x1x1 box centered at 0,0,0.5? No, our cars are scaled.
@@ -207,6 +212,12 @@ function createBrakeLightGeometry() {
     return BufferGeometryUtils.mergeGeometries([leftLight, rightLight]);
 }
 const BRAKE_LIGHT_GEO = createBrakeLightGeometry();
+
+// Pre-allocated objects for loop
+const VEC3_A = new THREE.Vector3();
+const VEC3_B = new THREE.Vector3();
+// For getAgentState caching/reuse
+const _agentState = { x: 0, y: 0, z: 0, yaw: 0, accel: 0, speed: 0 };
 
 
 export function Agents({ agents, trafficLights, frameRef }) {
@@ -252,37 +263,55 @@ export function Agents({ agents, trafficLights, frameRef }) {
     const cycSkinRef = useRef();
     const cycWireframeRef = useRef();
 
+    // Others Refs
+    const othersMeshRef = useRef();
+
 
     // ... (update loop) ...
     useFrame(() => {
         if (!frameRef) return;
         const currentFrame = frameRef.current;
         
-        // helper to get state
+        // helper to get state (optimized)
         const getAgentState = (agent) => {
             const traj = agent.trajectory;
             const idx1 = Math.floor(currentFrame);
-            const idx2 = Math.min(idx1 + 1, traj.length - 1);
+            // Clamp idx2
+            const len = traj.length;
+            if (idx1 >= len) return null; // Should not happen usually
+
+            const idx2 = Math.min(idx1 + 1, len - 1);
             const alpha = currentFrame - idx1;
             const step1 = traj[idx1];
-            const step2 = traj[idx2];
             
             if (!step1) return null;
             
-            let x, y, z, yaw;
+            const step2 = traj[idx2];
+
             if (step2 && step1 !== step2) {
-                 x = THREE.MathUtils.lerp(step1.x, step2.x, alpha);
-                 y = THREE.MathUtils.lerp(step1.y, step2.y, alpha);
-                 z = THREE.MathUtils.lerp(step1.z, step2.z, alpha);
+                 // Manual Lerp to avoid allocations
+                 _agentState.x = step1.x + (step2.x - step1.x) * alpha;
+                 _agentState.y = step1.y + (step2.y - step1.y) * alpha;
+                 _agentState.z = step1.z + (step2.z - step1.z) * alpha;
+
                  let dYaw = step2.yaw - step1.yaw;
                  while (dYaw > Math.PI) dYaw -= 2 * Math.PI;
                  while (dYaw < -Math.PI) dYaw += 2 * Math.PI;
-                 yaw = step1.yaw + dYaw * alpha;
+                 _agentState.yaw = step1.yaw + dYaw * alpha;
+
+                 // Velocities/Accel can be lerped if needed, but for rendering pos/rot only above matters
+                 // Braking logic needs accel
+                 const a1 = step1.accel || 0;
+                 const a2 = step2.accel || 0;
+                 _agentState.accel = a1 + (a2 - a1) * alpha;
             } else {
-                 x = step1.x; y = step1.y; z = step1.z;
-                 yaw = step1.yaw; 
+                 _agentState.x = step1.x;
+                 _agentState.y = step1.y;
+                 _agentState.z = step1.z;
+                 _agentState.yaw = step1.yaw;
+                 _agentState.accel = step1.accel || 0;
             }
-            return { x, y, z, yaw, valid: true };
+            return _agentState;
         };
         
         const updateInstance = (idx, agent, refs, scaleOverride) => {
@@ -364,22 +393,6 @@ export function Agents({ agents, trafficLights, frameRef }) {
                      TEMP_OBJECT.updateMatrix();
                      vehicleBrakeLightRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
 
-                     // Color - Emissive Boost for Bloom
-                     // Standard Red: #ff0000. 
-                     // Braking: Bright Neon Red #ff0000 with high intensity? 
-                     // ToneMapping might clamp, but Bloom threshold is 1.0.
-                     // If we want glow, we need updates. 
-                     // Actually InstancedMesh setColorAt sets the diffuse color.
-                     // Emissive intensity is global in standard material.
-                     // Strategy: Use a meshBasicMaterial for lights? 
-                     // Or use MeshStandardMaterial with high emissive?
-                     // Let's use MeshBasicMaterial.
-                     // Off: Dark Red #330000
-                     // On: Bright Red #ff0000 -> With Bloom it will glow if > 1.0? 
-                     // RGB 1.0 is max. Bloom threshold 1.0... 
-                     // We might need > 1.0 for strong bloom. 
-                     // R3F: extend color ranges or use toneMapped=false?
-                     // With toneMapped=false, colors > 1.0 are preserved.
                      if (isBraking) {
                         TEMP_COLOR.set('#ff0000');
                         TEMP_COLOR.multiplyScalar(5.0); // Super bright
@@ -459,19 +472,50 @@ export function Agents({ agents, trafficLights, frameRef }) {
             }
         }
 
+        // Others (Optimized with InstancedMesh)
+        if (others.length > 0 && othersMeshRef.current) {
+             others.forEach((agent, i) => {
+                 const st = getAgentState(agent);
+                 if(!st) {
+                     TEMP_OBJECT.scale.set(0,0,0);
+                     TEMP_OBJECT.updateMatrix();
+                     othersMeshRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
+                     return;
+                 }
+
+                 // Generic boxes are unit cubes (1x1x1) bottom-aligned.
+                 // We scale them to agent dims.
+                 const h = agent.dims[2];
+                 TEMP_OBJECT.position.set(st.x, st.y, st.z - h/2); // Z is centroid, so -h/2
+                 TEMP_OBJECT.rotation.set(0, 0, st.yaw);
+                 TEMP_OBJECT.scale.set(agent.dims[0], agent.dims[1], agent.dims[2]);
+                 TEMP_OBJECT.updateMatrix();
+                 othersMeshRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
+
+                 // Color
+                 const color = getTypeColor(agent.type);
+                 TEMP_COLOR.set(color);
+                 othersMeshRef.current.setColorAt(i, TEMP_COLOR);
+             });
+             othersMeshRef.current.instanceMatrix.needsUpdate = true;
+             if(othersMeshRef.current.instanceColor) othersMeshRef.current.instanceColor.needsUpdate = true;
+        }
+
     });
 
     return (
         <group>
-            {/* SDC (Special) */}
+            {/* SDC (Special - Keep as component) */}
             {sdc.map((agent) => (
                 <AgentItem key={`sdc-${agent.id}`} agent={agent} trafficLights={trafficLights} frameRef={frameRef} />
             ))}
             
-            {/* Others (Special) - fallback */}
-            {others.map((agent, index) => (
-                 <AgentItem key={`other-${agent.id}-${index}`} agent={agent} frameRef={frameRef} />
-            ))}
+            {/* Others - Now Instanced */}
+            {others.length > 0 && (
+                <instancedMesh ref={othersMeshRef} args={[GENERIC_BOX_GEO, null, others.length]} frustumCulled={false}>
+                    <meshStandardMaterial />
+                </instancedMesh>
+            )}
             
             {/* Vehicles - Now using GENERIC_CAR_GEO */}
             {vehicles.length > 0 && (
@@ -550,12 +594,10 @@ export function Agents({ agents, trafficLights, frameRef }) {
     );
 }
 
-function AgentItem({ agent, trafficLights, frameRef }) {
+// AgentItem only used for SDC now
+function AgentItem({ agent, frameRef }) {
     const groupRef = useRef();
-
     const bodyRef = useRef();
-
-
     const [isBraking, setIsBraking] = React.useState(false);
 
     useFrame(() => {
@@ -574,9 +616,9 @@ function AgentItem({ agent, trafficLights, frameRef }) {
         }
         if (groupRef.current) groupRef.current.visible = true;
 
-        let x, y, z, yaw, vx, vy, accel, speed;
+        let x, y, z, yaw, accel;
         
-        // Linear Interpolation for smoothness
+        // Linear Interpolation
         if (step2 && step1 !== step2) {
              x = THREE.MathUtils.lerp(step1.x, step2.x, alpha);
              y = THREE.MathUtils.lerp(step1.y, step2.y, alpha);
@@ -585,16 +627,11 @@ function AgentItem({ agent, trafficLights, frameRef }) {
              while (dYaw > Math.PI) dYaw -= 2 * Math.PI;
              while (dYaw < -Math.PI) dYaw += 2 * Math.PI;
              yaw = step1.yaw + dYaw * alpha;
-             vx = THREE.MathUtils.lerp(step1.vx, step2.vx, alpha);
-             vy = THREE.MathUtils.lerp(step1.vy, step2.vy, alpha);
              accel = THREE.MathUtils.lerp(step1.accel || 0, step2.accel || 0, alpha);
-             // Interpolate speed for smooth logic
-             speed = THREE.MathUtils.lerp(step1.speed || 0, step2.speed || 0, alpha);
         } else {
              x = step1.x; y = step1.y; z = step1.z;
-             yaw = step1.yaw; vx = step1.vx; vy = step1.vy;
+             yaw = step1.yaw;
              accel = step1.accel || 0;
-             speed = step1.speed || 0;
         }
 
         if (groupRef.current) groupRef.current.position.set(x, y, z);
@@ -602,11 +639,7 @@ function AgentItem({ agent, trafficLights, frameRef }) {
 
         const brakingNow = accel < -1.0;
         if (brakingNow !== isBraking) setIsBraking(brakingNow);
-
-
-        
     });
-
 
     return (
         <group ref={groupRef}>
@@ -614,16 +647,13 @@ function AgentItem({ agent, trafficLights, frameRef }) {
                 {agent.isSdc ? (
                         <WaymoCar dims={agent.dims} isBraking={isBraking} />
                 ) : (
+                    // Fallback for non-instanced non-SDC (should be covered by othersMesh)
                     <mesh> 
                         <boxGeometry args={[agent.dims[0], agent.dims[1], agent.dims[2]]} />
                         <meshStandardMaterial color={getTypeColor(agent.type)} />
                     </mesh>
                 )}
              </group>
-
-             
-
-
              {agent.isSdc && (
                  <mesh position={[0, 0, -0.7]} rotation={[0, 0, 0]}>
                     <ringGeometry args={[2.0, 2.5, 32]} />
@@ -631,7 +661,6 @@ function AgentItem({ agent, trafficLights, frameRef }) {
                  </mesh>
              )}
         </group>
-
     );
 }
 
