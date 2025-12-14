@@ -7,6 +7,11 @@ import { Crosswalks } from './Crosswalks';
 // Standard lane width in meters
 const LANE_WIDTH = 3.8;
 
+// Optimization: Reusable Vectors to prevent GC
+const TEMP_VEC1 = new THREE.Vector3();
+const TEMP_VEC2 = new THREE.Vector3();
+const TEMP_VEC3 = new THREE.Vector3();
+
 function createRibbonGeometry(points, width, isDashed = false, dashSize = 2, gapSize = 1.5, zOffset = 0) {
     if (points.length < 2) return null;
 
@@ -18,8 +23,9 @@ function createRibbonGeometry(points, width, isDashed = false, dashSize = 2, gap
     // p1, p2 are center points
     // width is total width
     const addQuad = (p1, p2, w) => {
-        const tangent = new THREE.Vector3().subVectors(p2, p1).normalize();
-        const normal = new THREE.Vector3(-tangent.y, tangent.x, 0).normalize();
+        // Use reusable vectors
+        const tangent = TEMP_VEC1.subVectors(p2, p1).normalize();
+        const normal = TEMP_VEC2.set(-tangent.y, tangent.x, 0).normalize();
         
         // Vertices
         // TL (0), TR (1), BL (2), BR (3) relative to segment
@@ -76,8 +82,14 @@ function createRibbonGeometry(points, width, isDashed = false, dashSize = 2, gap
                     const startT = distOnSeg / segLen;
                     const endT = (distOnSeg + drawLen) / segLen;
                     
-                    const startP = new THREE.Vector3().lerpVectors(p1, p2, startT);
-                    const endP = new THREE.Vector3().lerpVectors(p1, p2, endT);
+                    // Use clone() directly on the result of lerpVectors
+                    // TEMP_VEC3 is mutated by lerpVectors.
+                    // To be safe and clean:
+                    const startP = TEMP_VEC3.lerpVectors(p1, p2, startT).clone();
+                    // We need a separate vector for endP to not overwrite startP if it wasn't cloned (but it is)
+                    // But since we cloned startP, we can reuse TEMP_VEC3 for endP.
+
+                    const endP = TEMP_VEC3.lerpVectors(p1, p2, endT);
                     
                     addQuad(startP, endP, width);
                     
@@ -107,15 +119,17 @@ function createRibbonGeometry(points, width, isDashed = false, dashSize = 2, gap
             const p = points[i];
             
             let tangent;
+            // Use TEMP_VEC1 for tangent
             if (i === 0) {
-                tangent = new THREE.Vector3().subVectors(points[i + 1], p).normalize();
+                tangent = TEMP_VEC1.subVectors(points[i + 1], p).normalize();
             } else if (i === points.length - 1) {
-                tangent = new THREE.Vector3().subVectors(p, points[i - 1]).normalize();
+                tangent = TEMP_VEC1.subVectors(p, points[i - 1]).normalize();
             } else {
-                tangent = new THREE.Vector3().subVectors(points[i + 1], points[i - 1]).normalize();
+                tangent = TEMP_VEC1.subVectors(points[i + 1], points[i - 1]).normalize();
             }
 
-            const normal = new THREE.Vector3(-tangent.y, tangent.x, 0).normalize();
+            // Use TEMP_VEC2 for normal
+            const normal = TEMP_VEC2.set(-tangent.y, tangent.x, 0).normalize();
             const dx = normal.x * width / 2;
             const dy = normal.y * width / 2;
 

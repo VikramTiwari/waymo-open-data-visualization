@@ -245,7 +245,8 @@ export function WaymoCar({ dims = [4.68, 2.0, 1.56], isBraking = false }) {
     );
 }
 
-function DetailedWheel({ position, radius, side }) {
+// Optimization: Memoized components to prevent geometry re-creation
+const DetailedWheel = React.memo(function DetailedWheel({ position, radius, side }) {
     const width = 0.28;
     const rimRadius = radius * 0.65;
 
@@ -262,23 +263,42 @@ function DetailedWheel({ position, radius, side }) {
 
     const isRight = side === 'right';
 
+    // Optimization: create geometries in useMemo
+    const { tireGeo, treadGeo, rimGeo, spokeHGeo, spokeVGeo, hubGeo } = useMemo(() => ({
+        tireGeo: new THREE.TorusGeometry(radius - 0.06, 0.06, 16, 48),
+        treadGeo: new THREE.CylinderGeometry(radius - 0.02, radius - 0.02, width - 0.05, 32),
+        rimGeo: new THREE.CylinderGeometry(rimRadius, rimRadius, width * 0.6, 32),
+        spokeHGeo: new THREE.BoxGeometry(rimRadius*1.8, 0.05, 0.02),
+        spokeVGeo: new THREE.BoxGeometry(rimRadius*1.8, 0.05, 0.02),
+        hubGeo: new THREE.CylinderGeometry(0.05, 0.05, 0.02, 16)
+    }), [radius, rimRadius]); // Depend only on radius
+
+    // Disposal cleanup
+    React.useEffect(() => {
+        return () => {
+            tireGeo.dispose();
+            treadGeo.dispose();
+            rimGeo.dispose();
+            spokeHGeo.dispose();
+            spokeVGeo.dispose();
+            hubGeo.dispose();
+        }
+    }, [tireGeo, treadGeo, rimGeo, spokeHGeo, spokeVGeo, hubGeo]);
+
     return (
         <group position={position} rotation={isRight ? [Math.PI, 0, 0] : [0, 0, 0]}>
             {/* Tire (Torus) - XZ Plane */}
-             <mesh rotation={[Math.PI/2, 0, 0]}>
-                <torusGeometry args={[radius - 0.06, 0.06, 16, 48]} />
+             <mesh rotation={[Math.PI/2, 0, 0]} geometry={tireGeo}>
                 <meshStandardMaterial color="#1a1a1a" roughness={0.8} />
             </mesh>
 
             {/* Tire Tread (Cylinder) - Y Axis */}
-            <mesh>
-                 <cylinderGeometry args={[radius - 0.02, radius - 0.02, width - 0.05, 32]} />
+            <mesh geometry={treadGeo}>
                  <meshStandardMaterial color="#1a1a1a" roughness={0.9} />
             </mesh>
 
             {/* Rim (Cylinder) - Y Axis */}
-            <mesh>
-                <cylinderGeometry args={[rimRadius, rimRadius, width * 0.6, 32]} />
+            <mesh geometry={rimGeo}>
                 <meshStandardMaterial color="#ccc" metalness={0.7} roughness={0.2} />
             </mesh>
 
@@ -287,39 +307,47 @@ function DetailedWheel({ position, radius, side }) {
             {/* And offset slightly in Y to be on the outside. */}
             <group position={[0, width * 0.2, 0]}>
                  {/* Horizontal Spoke (Along X) */}
-                 <mesh>
-                     <boxGeometry args={[rimRadius*1.8, 0.05, 0.02]} />
+                 <mesh geometry={spokeHGeo}>
                      <meshStandardMaterial color="#888" metalness={0.8} />
                  </mesh>
                  {/* Vertical Spoke (Along Z) */}
-                 <mesh rotation={[0, Math.PI/2, 0]}>
-                     <boxGeometry args={[rimRadius*1.8, 0.05, 0.02]} />
+                 <mesh rotation={[0, Math.PI/2, 0]} geometry={spokeVGeo}>
                      <meshStandardMaterial color="#888" metalness={0.8} />
                  </mesh>
             </group>
 
              {/* Hub Cap - Center of Face */}
-             <mesh position={[0, width * 0.25, 0]} rotation={[Math.PI/2, 0, 0]}>
-                 <cylinderGeometry args={[0.05, 0.05, 0.02, 16]} />
+             <mesh position={[0, width * 0.25, 0]} rotation={[Math.PI/2, 0, 0]} geometry={hubGeo}>
                  <meshStandardMaterial color="#000" />
              </mesh>
         </group>
     )
-}
+});
 
-function CarLight({ position, color, type, isBraking, target }) {
+const CarLight = React.memo(function CarLight({ position, color, type, isBraking, target }) {
     const intensity = isBraking ? 4.0 : 1.0;
+
+    // Static geometries (could be module level, but per-component useMemo is fine)
+    const { housingGeo, lensGeo } = useMemo(() => ({
+        housingGeo: new THREE.BoxGeometry(0.1, 0.15, 0.2),
+        lensGeo: new THREE.PlaneGeometry(0.08, 0.18)
+    }), []);
+
+    React.useEffect(() => {
+        return () => {
+            housingGeo.dispose();
+            lensGeo.dispose();
+        }
+    }, [housingGeo, lensGeo]);
 
     return (
         <group position={position}>
             {/* Housing */}
-            <mesh rotation={[0, Math.PI/2, 0]}>
-                <boxGeometry args={[0.1, 0.15, 0.2]} />
+            <mesh rotation={[0, Math.PI/2, 0]} geometry={housingGeo}>
                 <meshStandardMaterial color="#333" />
             </mesh>
             {/* Lens */}
-            <mesh position={[0.05, 0, 0]} rotation={[0, Math.PI/2, 0]}>
-                 <planeGeometry args={[0.08, 0.18]} />
+            <mesh position={[0.05, 0, 0]} rotation={[0, Math.PI/2, 0]} geometry={lensGeo}>
                  <meshStandardMaterial
                     color={color}
                     emissive={color}
@@ -345,56 +373,78 @@ function CarLight({ position, color, type, isBraking, target }) {
             )}
         </group>
     )
-}
+});
 
-function SensorSuite({ position }) {
+const SensorSuite = React.memo(function SensorSuite({ position }) {
+    const { baseGeo, domeGeo, lidarGeo, topGeo, sidePuckGeo } = useMemo(() => ({
+        baseGeo: new THREE.BoxGeometry(0.6, 0.4, 0.05),
+        domeGeo: new THREE.CylinderGeometry(0.12, 0.14, 0.35, 32),
+        lidarGeo: new THREE.CylinderGeometry(0.125, 0.125, 0.1, 32),
+        topGeo: new THREE.CylinderGeometry(0.13, 0.13, 0.01, 32),
+        sidePuckGeo: new THREE.CylinderGeometry(0.06, 0.07, 0.15, 16)
+    }), []);
+
+    React.useEffect(() => {
+        return () => {
+            baseGeo.dispose();
+            domeGeo.dispose();
+            lidarGeo.dispose();
+            topGeo.dispose();
+            sidePuckGeo.dispose();
+        }
+    }, [baseGeo, domeGeo, lidarGeo, topGeo, sidePuckGeo]);
+
     return (
         <group position={position}>
              {/* Base */}
-             <mesh position={[0, 0, 0.02]}>
-                 <boxGeometry args={[0.6, 0.4, 0.05]} />
+             <mesh position={[0, 0, 0.02]} geometry={baseGeo}>
                  <meshStandardMaterial color="#ddd" />
              </mesh>
              {/* Main Dome (Waymo Driver) */}
-             <mesh position={[0, 0, 0.25]} rotation={[Math.PI/2, 0, 0]}>
-                  <cylinderGeometry args={[0.12, 0.14, 0.35, 32]} />
+             <mesh position={[0, 0, 0.25]} rotation={[Math.PI/2, 0, 0]} geometry={domeGeo}>
                   <meshStandardMaterial color="#111" metalness={0.8} roughness={0.1} />
              </mesh>
              {/* Spinning LiDAR Graphic (Static but styled) */}
-             <mesh position={[0, 0, 0.35]} rotation={[Math.PI/2, 0, 0]}>
-                 <cylinderGeometry args={[0.125, 0.125, 0.1, 32]} />
+             <mesh position={[0, 0, 0.35]} rotation={[Math.PI/2, 0, 0]} geometry={lidarGeo}>
                   <meshStandardMaterial color="#222" metalness={0.5} />
                   {/* We could animate rotation here if we had ref */}
              </mesh>
-             <mesh position={[0, 0, 0.41]} rotation={[Math.PI/2, 0, 0]}>
-                 <cylinderGeometry args={[0.13, 0.13, 0.01, 32]} />
+             <mesh position={[0, 0, 0.41]} rotation={[Math.PI/2, 0, 0]} geometry={topGeo}>
                  <meshStandardMaterial color="#444" />
              </mesh>
 
              {/* Side Pucks on Roof Rack */}
-             <mesh position={[-0.1, 0.25, 0.1]} rotation={[Math.PI/2, 0, 0]}>
-                  <cylinderGeometry args={[0.06, 0.07, 0.15, 16]} />
+             <mesh position={[-0.1, 0.25, 0.1]} rotation={[Math.PI/2, 0, 0]} geometry={sidePuckGeo}>
                   <meshStandardMaterial color="#111" />
              </mesh>
-             <mesh position={[-0.1, -0.25, 0.1]} rotation={[Math.PI/2, 0, 0]}>
-                  <cylinderGeometry args={[0.06, 0.07, 0.15, 16]} />
+             <mesh position={[-0.1, -0.25, 0.1]} rotation={[Math.PI/2, 0, 0]} geometry={sidePuckGeo}>
                   <meshStandardMaterial color="#111" />
              </mesh>
         </group>
     )
-}
+});
 
-function SideSensor({ position, side }) {
+const SideSensor = React.memo(function SideSensor({ position, side }) {
+    const { bodyGeo, lensGeo } = useMemo(() => ({
+        bodyGeo: new THREE.CylinderGeometry(0.06, 0.07, 0.12, 16),
+        lensGeo: new THREE.SphereGeometry(0.06, 16, 16)
+    }), []);
+
+    React.useEffect(() => {
+        return () => {
+            bodyGeo.dispose();
+            lensGeo.dispose();
+        }
+    }, [bodyGeo, lensGeo]);
+
     return (
         <group position={position} rotation={[0, 0, side === 'left' ? 0.3 : -0.3]}>
-            <mesh>
-                <cylinderGeometry args={[0.06, 0.07, 0.12, 16]} />
+            <mesh geometry={bodyGeo}>
                 <meshStandardMaterial color="#111" metalness={0.8} />
             </mesh>
-             <mesh position={[0, 0, 0.065]}>
-                <sphereGeometry args={[0.06, 16, 16]} />
+             <mesh position={[0, 0, 0.065]} geometry={lensGeo}>
                 <meshStandardMaterial color="#000" />
             </mesh>
         </group>
     )
-}
+});

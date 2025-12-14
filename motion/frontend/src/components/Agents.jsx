@@ -8,6 +8,19 @@ import { WaymoCar } from './WaymoCar';
 const TEMP_OBJECT = new THREE.Object3D();
 const TEMP_COLOR = new THREE.Color();
 
+// Optimization: Pre-allocate Colors to avoid string parsing every frame
+const TYPE_COLORS = {
+  1: new THREE.Color('#4285F4'), // Vehicle
+  2: new THREE.Color('#FF9800'), // Pedestrian
+  3: new THREE.Color('#FBBC04'), // Cyclist/Sign?
+  4: new THREE.Color('#34A853'), // Cyclist
+  default: new THREE.Color('gray')
+};
+
+function getTypeColorObj(type) {
+    return TYPE_COLORS[type] || TYPE_COLORS.default;
+}
+
 // --- GEOMETRY FACTORIES ---
 // We create merged geometries for the static parts of generic agents (Pedestrians, Cyclists)
 // so we can use a single InstancedMesh for each "material layer".
@@ -266,6 +279,10 @@ export function Agents({ agents, trafficLights, frameRef }) {
     // Others Refs
     const othersMeshRef = useRef();
 
+    // Optimization: Stable arrays for Loop to avoid GC
+    // We create these once per render (or could be memoized, but component re-renders are rare compared to frame loop)
+    const pedRefs = [pedPantsRef, pedShirtRef, pedSkinRef];
+    const cycRefs = [cycFrameRef, cycWheelRef, cycClothesRef, cycSkinRef];
 
     // ... (update loop) ...
     useFrame(() => {
@@ -369,8 +386,11 @@ export function Agents({ agents, trafficLights, frameRef }) {
                  TEMP_OBJECT.updateMatrix();
                  vehicleMeshRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
                  
-                 const color = agent.isParked ? "#abcbfd" : getTypeColor(agent.type);
-                 TEMP_COLOR.set(color);
+                 if (agent.isParked) {
+                    TEMP_COLOR.set("#abcbfd");
+                 } else {
+                    TEMP_COLOR.copy(getTypeColorObj(agent.type));
+                 }
                  vehicleMeshRef.current.setColorAt(i, TEMP_COLOR);
 
                  // Update Vehicle Wireframe - Matches Body Transform
@@ -419,15 +439,14 @@ export function Agents({ agents, trafficLights, frameRef }) {
         // Pedestrians
         if (peds.length > 0) {
             peds.forEach((agent, i) => {
-                 updateInstance(i, agent, [pedPantsRef, pedShirtRef, pedSkinRef]);
+                 updateInstance(i, agent, pedRefs);
                  // Color Update for Shirt only
                  if (pedShirtRef.current) {
-                     const color = getTypeColor(agent.type); // #FF9800
-                     TEMP_COLOR.set(color);
+                     TEMP_COLOR.copy(getTypeColorObj(agent.type));
                      pedShirtRef.current.setColorAt(i, TEMP_COLOR);
                  }
             });
-            [pedPantsRef, pedShirtRef, pedSkinRef].forEach(r => {
+            pedRefs.forEach(r => {
                  if (r.current) {
                      r.current.instanceMatrix.needsUpdate = true;
                      if(r.current.instanceColor) r.current.instanceColor.needsUpdate = true;
@@ -438,10 +457,10 @@ export function Agents({ agents, trafficLights, frameRef }) {
         // Cyclists
         if (cyclists.length > 0) {
             cyclists.forEach((agent, i) => {
-                 updateInstance(i, agent, [cycFrameRef, cycWheelRef, cycClothesRef, cycSkinRef]);
+                 updateInstance(i, agent, cycRefs);
                  // Color Update for Clothes
                  if (cycClothesRef.current) {
-                      TEMP_COLOR.set('#34A853');
+                      TEMP_COLOR.set('#34A853'); // Or use type color
                       cycClothesRef.current.setColorAt(i, TEMP_COLOR);
                  }
 
@@ -493,8 +512,7 @@ export function Agents({ agents, trafficLights, frameRef }) {
                  othersMeshRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
 
                  // Color
-                 const color = getTypeColor(agent.type);
-                 TEMP_COLOR.set(color);
+                 TEMP_COLOR.copy(getTypeColorObj(agent.type));
                  othersMeshRef.current.setColorAt(i, TEMP_COLOR);
              });
              othersMeshRef.current.instanceMatrix.needsUpdate = true;
@@ -650,7 +668,7 @@ function AgentItem({ agent, frameRef }) {
                     // Fallback for non-instanced non-SDC (should be covered by othersMesh)
                     <mesh> 
                         <boxGeometry args={[agent.dims[0], agent.dims[1], agent.dims[2]]} />
-                        <meshStandardMaterial color={getTypeColor(agent.type)} />
+                        <meshStandardMaterial color={getTypeColorObj(agent.type)} />
                     </mesh>
                 )}
              </group>
@@ -664,12 +682,3 @@ function AgentItem({ agent, frameRef }) {
     );
 }
 
-function getTypeColor(type) {
-  switch(type) {
-    case 1: return '#4285F4'; 
-    case 2: return '#FF9800'; 
-    case 3: return '#FBBC04';
-    case 4: return '#34A853'; 
-    default: return 'gray';
-  }
-}
