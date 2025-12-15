@@ -10,50 +10,38 @@ const LANE_WIDTH = 3.8;
 function createRibbonGeometry(points, width, isDashed = false, dashSize = 2, gapSize = 1.5, zOffset = 0) {
     if (points.length < 2) return null;
 
-    const vertices = [];
-    const indices = []; // Uint16 or Uint32? Standard JS array fine for Three
-    const uvs = [];
-
-    // Helper to add a quad
-    // p1, p2 are center points
-    // width is total width
-    const addQuad = (p1, p2, w) => {
-        const tangent = new THREE.Vector3().subVectors(p2, p1).normalize();
-        const normal = new THREE.Vector3(-tangent.y, tangent.x, 0).normalize();
-        
-        // Vertices
-        // TL (0), TR (1), BL (2), BR (3) relative to segment
-        // 0: P1 + Left
-        // 1: P1 - Left (Right)
-        // 2: P2 + Left
-        // 3: P2 - Left (Right)
-        
-        const dx = normal.x * w / 2;
-        const dy = normal.y * w / 2;
-
-        const baseIdx = vertices.length / 3;
-
-        // P1 Left
-        vertices.push(p1.x + dx, p1.y + dy, p1.z + zOffset);
-        // P1 Right 
-        vertices.push(p1.x - dx, p1.y - dy, p1.z + zOffset);
-        // P2 Left
-        vertices.push(p2.x + dx, p2.y + dy, p2.z + zOffset);
-        // P2 Right
-        vertices.push(p2.x - dx, p2.y - dy, p2.z + zOffset);
-
-        // UVs (Simple 0-1)
-        uvs.push(0, 0);
-        uvs.push(1, 0);
-        uvs.push(0, 1);
-        uvs.push(1, 1);
-
-        // Indices: 0, 2, 1 and 1, 2, 3
-        indices.push(baseIdx, baseIdx + 2, baseIdx + 1);
-        indices.push(baseIdx + 1, baseIdx + 2, baseIdx + 3);
-    };
+    // Use dynamic arrays for dashed since we don't know count
+    // Use pre-allocated TypedArrays for solid since count is deterministic
 
     if (isDashed) {
+        // Dashed Logic (Dynamic)
+        const vertices = [];
+        const indices = [];
+        const uvs = [];
+
+        const addQuad = (p1, p2, w) => {
+            const tangent = new THREE.Vector3().subVectors(p2, p1).normalize();
+            const normal = new THREE.Vector3(-tangent.y, tangent.x, 0).normalize();
+
+            const dx = normal.x * w / 2;
+            const dy = normal.y * w / 2;
+
+            const baseIdx = vertices.length / 3;
+
+            // Vertices
+            vertices.push(p1.x + dx, p1.y + dy, p1.z + zOffset); // 0: P1 Left
+            vertices.push(p1.x - dx, p1.y - dy, p1.z + zOffset); // 1: P1 Right
+            vertices.push(p2.x + dx, p2.y + dy, p2.z + zOffset); // 2: P2 Left
+            vertices.push(p2.x - dx, p2.y - dy, p2.z + zOffset); // 3: P2 Right
+
+            // UVs
+            uvs.push(0, 0, 1, 0, 0, 1, 1, 1);
+
+            // Indices
+            indices.push(baseIdx, baseIdx + 2, baseIdx + 1);
+            indices.push(baseIdx + 1, baseIdx + 2, baseIdx + 3);
+        };
+
         let currentDist = 0;
         
         for (let i = 0; i < points.length - 1; i++) {
@@ -68,7 +56,6 @@ function createRibbonGeometry(points, width, isDashed = false, dashSize = 2, gap
                 const cyclePos = globalDist % (dashSize + gapSize);
                 
                 if (cyclePos < dashSize) {
-                    // Draw mode
                     const remainingDash = dashSize - cyclePos;
                     const remainingSeg = segLen - distOnSeg;
                     const drawLen = Math.min(remainingDash, remainingSeg);
@@ -84,7 +71,6 @@ function createRibbonGeometry(points, width, isDashed = false, dashSize = 2, gap
                     currentDist += drawLen;
                     distOnSeg += drawLen;
                 } else {
-                    // Gap mode
                     const remainingGap = (dashSize + gapSize) - cyclePos;
                     const remainingSeg = segLen - distOnSeg;
                     const skipLen = Math.min(remainingGap, remainingSeg);
@@ -94,54 +80,91 @@ function createRibbonGeometry(points, width, isDashed = false, dashSize = 2, gap
                 }
             }
         }
+
+        if (vertices.length === 0) return null;
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+        geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+        geo.setIndex(indices);
+        geo.computeVertexNormals();
+        return geo;
+
     } else {
-        // Solid Strip - Continuous Mesh
-        // This is slightly better than quads if we want smooth joins, 
-        // but for road ribbons, simple quads usually suffice or "strip" logic.
-        // Let's use the strip logic for solid to match previous behavior 
-        // (createSingleStrip function was doing this). 
-        // But we want to inline it or use the same buffer logic.
-        
-        // Re-implement solid strip logic here to return similar structure
-        for (let i = 0; i < points.length; i++) {
+        // Solid Strip - Continuous Mesh - OPTIMIZED
+        const count = points.length;
+        // Each point adds 2 vertices (Left, Right)
+        const vCount = count * 2;
+        // Quads = count - 1. Triangles = Quads * 2. Indices = Triangles * 3.
+        const iCount = (count - 1) * 6;
+
+        const vertices = new Float32Array(vCount * 3);
+        const uvs = new Float32Array(vCount * 2);
+        const indices = new Uint16Array(iCount); // Max 65k vertices (ok for segments usually)
+
+        const tangent = new THREE.Vector3();
+        const normal = new THREE.Vector3();
+
+        for (let i = 0; i < count; i++) {
             const p = points[i];
             
-            let tangent;
+            // Compute Tangent
             if (i === 0) {
-                tangent = new THREE.Vector3().subVectors(points[i + 1], p).normalize();
-            } else if (i === points.length - 1) {
-                tangent = new THREE.Vector3().subVectors(p, points[i - 1]).normalize();
+                tangent.subVectors(points[i + 1], p).normalize();
+            } else if (i === count - 1) {
+                tangent.subVectors(p, points[i - 1]).normalize();
             } else {
-                tangent = new THREE.Vector3().subVectors(points[i + 1], points[i - 1]).normalize();
+                tangent.subVectors(points[i + 1], points[i - 1]).normalize();
             }
 
-            const normal = new THREE.Vector3(-tangent.y, tangent.x, 0).normalize();
+            // Compute Normal (-y, x) for 2D XY plane logic
+            normal.set(-tangent.y, tangent.x, 0).normalize();
+
             const dx = normal.x * width / 2;
             const dy = normal.y * width / 2;
 
-            vertices.push(p.x + dx, p.y + dy, p.z + zOffset); // Left
-            vertices.push(p.x - dx, p.y - dy, p.z + zOffset); // Right
-            
-            uvs.push(0, 0);
-            uvs.push(1, 0);
+            // Vertices: Left (i*2), Right (i*2+1)
+            const idxL = i * 2;
+            const idxR = i * 2 + 1;
 
-            if (i < points.length - 1) {
+            // Left Vertex
+            vertices[idxL * 3] = p.x + dx;
+            vertices[idxL * 3 + 1] = p.y + dy;
+            vertices[idxL * 3 + 2] = p.z + zOffset;
+            
+            // Right Vertex
+            vertices[idxR * 3] = p.x - dx;
+            vertices[idxR * 3 + 1] = p.y - dy;
+            vertices[idxR * 3 + 2] = p.z + zOffset;
+
+            // UVs
+            uvs[idxL * 2] = 0;
+            uvs[idxL * 2 + 1] = 0;
+            uvs[idxR * 2] = 1;
+            uvs[idxR * 2 + 1] = 0;
+
+            // Indices
+            if (i < count - 1) {
                 const base = i * 2;
-                indices.push(base, base + 2, base + 1);
-                indices.push(base + 1, base + 2, base + 3);
+                const iIdx = i * 6;
+                // Triangle 1: Base, Base+2 (NextL), Base+1 (Right)
+                indices[iIdx] = base;
+                indices[iIdx + 1] = base + 2;
+                indices[iIdx + 2] = base + 1;
+
+                // Triangle 2: Base+1, Base+2, Base+3 (NextR)
+                indices[iIdx + 3] = base + 1;
+                indices[iIdx + 4] = base + 2;
+                indices[iIdx + 5] = base + 3;
             }
         }
+
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+        geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+        geo.setIndex(new THREE.BufferAttribute(indices, 1));
+        geo.computeVertexNormals();
+        return geo;
     }
-
-    if (vertices.length === 0) return null;
-
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-    geo.setIndex(indices);
-    geo.computeVertexNormals();
-    
-    return geo;
 }
 
 

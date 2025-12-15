@@ -219,6 +219,18 @@ const VEC3_B = new THREE.Vector3();
 // For getAgentState caching/reuse
 const _agentState = { x: 0, y: 0, z: 0, yaw: 0, accel: 0, speed: 0 };
 
+const TYPE_COLORS = {
+    1: 0x4285F4,
+    2: 0xFF9800,
+    3: 0xFBBC04,
+    4: 0x34A853
+};
+const DEFAULT_COLOR = 0x808080;
+const PARKED_COLOR = 0xabcbfd;
+const BRAKING_COLOR = 0xff0000;
+const BRAKE_OFF_COLOR = 0x330000;
+const CYC_CLOTHES_COLOR = 0x34A853;
+
 
 export function Agents({ agents, trafficLights, frameRef }) {
 
@@ -369,8 +381,8 @@ export function Agents({ agents, trafficLights, frameRef }) {
                  TEMP_OBJECT.updateMatrix();
                  vehicleMeshRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
                  
-                 const color = agent.isParked ? "#abcbfd" : getTypeColor(agent.type);
-                 TEMP_COLOR.set(color);
+                 const color = agent.isParked ? PARKED_COLOR : (TYPE_COLORS[agent.type] || DEFAULT_COLOR);
+                 TEMP_COLOR.setHex(color);
                  vehicleMeshRef.current.setColorAt(i, TEMP_COLOR);
 
                  // Update Vehicle Wireframe - Matches Body Transform
@@ -394,10 +406,10 @@ export function Agents({ agents, trafficLights, frameRef }) {
                      vehicleBrakeLightRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
 
                      if (isBraking) {
-                        TEMP_COLOR.set('#ff0000');
+                        TEMP_COLOR.setHex(BRAKING_COLOR);
                         TEMP_COLOR.multiplyScalar(5.0); // Super bright
                      } else {
-                        TEMP_COLOR.set('#330000');
+                        TEMP_COLOR.setHex(BRAKE_OFF_COLOR);
                      }
                      vehicleBrakeLightRef.current.setColorAt(i, TEMP_COLOR);
                  }
@@ -422,8 +434,8 @@ export function Agents({ agents, trafficLights, frameRef }) {
                  updateInstance(i, agent, [pedPantsRef, pedShirtRef, pedSkinRef]);
                  // Color Update for Shirt only
                  if (pedShirtRef.current) {
-                     const color = getTypeColor(agent.type); // #FF9800
-                     TEMP_COLOR.set(color);
+                     const color = TYPE_COLORS[agent.type] || DEFAULT_COLOR; // #FF9800
+                     TEMP_COLOR.setHex(color);
                      pedShirtRef.current.setColorAt(i, TEMP_COLOR);
                  }
             });
@@ -441,7 +453,7 @@ export function Agents({ agents, trafficLights, frameRef }) {
                  updateInstance(i, agent, [cycFrameRef, cycWheelRef, cycClothesRef, cycSkinRef]);
                  // Color Update for Clothes
                  if (cycClothesRef.current) {
-                      TEMP_COLOR.set('#34A853');
+                      TEMP_COLOR.setHex(CYC_CLOTHES_COLOR);
                       cycClothesRef.current.setColorAt(i, TEMP_COLOR);
                  }
 
@@ -493,8 +505,8 @@ export function Agents({ agents, trafficLights, frameRef }) {
                  othersMeshRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
 
                  // Color
-                 const color = getTypeColor(agent.type);
-                 TEMP_COLOR.set(color);
+                 const color = TYPE_COLORS[agent.type] || DEFAULT_COLOR;
+                 TEMP_COLOR.setHex(color);
                  othersMeshRef.current.setColorAt(i, TEMP_COLOR);
              });
              othersMeshRef.current.instanceMatrix.needsUpdate = true;
@@ -600,6 +612,7 @@ function AgentItem({ agent, frameRef }) {
     const bodyRef = useRef();
     const [isBraking, setIsBraking] = React.useState(false);
 
+    // Optimized frame update
     useFrame(() => {
         if (!frameRef) return;
         const currentFrame = frameRef.current;
@@ -650,7 +663,7 @@ function AgentItem({ agent, frameRef }) {
                     // Fallback for non-instanced non-SDC (should be covered by othersMesh)
                     <mesh> 
                         <boxGeometry args={[agent.dims[0], agent.dims[1], agent.dims[2]]} />
-                        <meshStandardMaterial color={getTypeColor(agent.type)} />
+                        <meshStandardMaterial color={getTypeColorString(agent.type)} />
                     </mesh>
                 )}
              </group>
@@ -664,7 +677,8 @@ function AgentItem({ agent, frameRef }) {
     );
 }
 
-function getTypeColor(type) {
+function getTypeColorString(type) {
+  // Only used for fallbacks now
   switch(type) {
     case 1: return '#4285F4'; 
     case 2: return '#FF9800'; 

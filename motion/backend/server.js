@@ -237,6 +237,7 @@ function pruneData(record) {
 
     // Detect Input Type and Iterate
     if (Array.isArray(originalMap)) {
+        // Arrays (from TFRecords protobuf) need iteration as random access isn't by key
         originalMap.forEach(entry => {
             let k, v;
             if (Array.isArray(entry)) {
