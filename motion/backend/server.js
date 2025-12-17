@@ -223,15 +223,13 @@ const FEATURE_WHITELIST = new Set([
     'path_samples/xyz', 'path_samples/id', 'path_samples/valid'
 ]);
 
+// Convert Set to Array for iteration
+const FEATURE_WHITELIST_ARRAY = Array.from(FEATURE_WHITELIST);
+
 function pruneData(record) {
     if (!record || !record.context || !record.context.featureMap) return record;
 
     const originalMap = record.context.featureMap;
-    // We want to return an Object to the frontend (JSON).
-    // The frontend code `new Map(Object.entries(featureMap || {}))` implies it expects an Object.
-    // If we send back an Array, `Object.entries(Array)` gives indices, which breaks logic.
-    // So we MUST return a plain Object { key: value }.
-
     const prunedMap = {};
     let foundAny = false;
 
@@ -260,10 +258,13 @@ function pruneData(record) {
             }
         }
     } else {
-        // Plain Object
-        const keys = Object.keys(originalMap);
-        keys.forEach(k => {
-             if (FEATURE_WHITELIST.has(k)) {
+        // Plain Object - Optimized Iteration
+        // Instead of Object.keys(originalMap) which is O(N) where N is all keys,
+        // we iterate the whitelist O(M) where M is whitelist size.
+        // Assuming N >> M.
+        FEATURE_WHITELIST_ARRAY.forEach(k => {
+             // We use Object.prototype.hasOwnProperty because originalMap might be created with null prototype or have shadowed props
+             if (Object.prototype.hasOwnProperty.call(originalMap, k)) {
                  prunedMap[k] = originalMap[k];
                  foundAny = true;
              }

@@ -1,18 +1,19 @@
 import React, { useRef, useEffect } from 'react';
 import * as THREE from 'three';
-import { useFrame } from '@react-three/fiber';
+// Removed useFrame since it's no longer used
 
 const TEMP_OBJECT = new THREE.Object3D();
 const TEMP_COLOR = new THREE.Color();
 
-export function TrafficLights({ trafficLights, frameRef }) {
+// eslint-disable-next-line no-unused-vars
+export function TrafficLights({ trafficLights, frameRef }) { // keeping frameRef in props to avoid breaking caller, though unused now?
 
     const housingRef = useRef();
     const redRef = useRef();
     const yellowRef = useRef();
     const greenRef = useRef();
 
-    // Initial Setup (Matrices)
+    // Initial Setup (Matrices) and Static Colors
     useEffect(() => {
         if (!housingRef.current || !redRef.current || !yellowRef.current || !greenRef.current || trafficLights.length === 0) return;
 
@@ -34,18 +35,8 @@ export function TrafficLights({ trafficLights, frameRef }) {
             redRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
             yellowRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
             greenRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
-        });
-        
-        housingRef.current.instanceMatrix.needsUpdate = true;
-        redRef.current.instanceMatrix.needsUpdate = true;
-        yellowRef.current.instanceMatrix.needsUpdate = true;
-        greenRef.current.instanceMatrix.needsUpdate = true;
-    }, [trafficLights]);
 
-    useFrame(() => {
-        if (!frameRef || !redRef.current || trafficLights.length === 0) return;
-
-        trafficLights.forEach((light, i) => {
+            // Set Static Colors
             // Use current state (11th step, index 10) for static color as requested.
             // "stay the same color and not be blinking"
             // We use the state at the 'current' timestamp of the data snapshot.
@@ -86,10 +77,16 @@ export function TrafficLights({ trafficLights, frameRef }) {
             greenRef.current.setColorAt(i, TEMP_COLOR);
         });
         
+        housingRef.current.instanceMatrix.needsUpdate = true;
+        redRef.current.instanceMatrix.needsUpdate = true;
+        yellowRef.current.instanceMatrix.needsUpdate = true;
+        greenRef.current.instanceMatrix.needsUpdate = true;
+
         redRef.current.instanceColor.needsUpdate = true;
         yellowRef.current.instanceColor.needsUpdate = true;
         greenRef.current.instanceColor.needsUpdate = true;
-    });
+
+    }, [trafficLights]);
 
     // Geometries
     const geometries = React.useMemo(() => {
