@@ -1,6 +1,44 @@
 import React, { useMemo, useState } from 'react';
 import * as THREE from 'three';
 
+// Define reusable geometries outside to avoid recreation
+const WHEEL_TIRE_GEO = new THREE.TorusGeometry(1, 0.06, 16, 48);
+const WHEEL_TREAD_GEO = new THREE.CylinderGeometry(1, 1, 1, 32);
+const WHEEL_RIM_GEO = new THREE.CylinderGeometry(1, 1, 1, 32);
+const SPOKE_H_GEO = new THREE.BoxGeometry(1, 0.05, 0.02);
+const SPOKE_V_GEO = new THREE.BoxGeometry(1, 0.05, 0.02);
+const HUB_CAP_GEO = new THREE.CylinderGeometry(0.05, 0.05, 0.02, 16);
+
+// Lights
+const LIGHT_HOUSING_GEO = new THREE.BoxGeometry(0.1, 0.15, 0.2);
+const LIGHT_LENS_GEO = new THREE.PlaneGeometry(0.08, 0.18);
+const GRILL_STRIP_GEO = new THREE.BoxGeometry(0.05, 1, 0.05); // width dynamic
+const EMBLEM_GEO = new THREE.CircleGeometry(0.04, 16);
+const LIGHT_BAR_GEO = new THREE.BoxGeometry(0.05, 1, 0.05); // width dynamic
+
+// Sensors
+const SENSOR_BASE_GEO = new THREE.BoxGeometry(0.6, 0.4, 0.05);
+const MAIN_DOME_GEO = new THREE.CylinderGeometry(0.12, 0.14, 0.35, 32);
+const LIDAR_GEO = new THREE.CylinderGeometry(0.125, 0.125, 0.1, 32);
+const LIDAR_TOP_GEO = new THREE.CylinderGeometry(0.13, 0.13, 0.01, 32);
+const PUCK_GEO = new THREE.CylinderGeometry(0.06, 0.07, 0.15, 16);
+const SIDE_SENSOR_BODY_GEO = new THREE.CylinderGeometry(0.06, 0.07, 0.12, 16);
+const SIDE_SENSOR_DOME_GEO = new THREE.SphereGeometry(0.06, 16, 16);
+
+// Materials
+const TIRE_MAT = new THREE.MeshStandardMaterial({ color: "#1a1a1a", roughness: 0.8 });
+const TREAD_MAT = new THREE.MeshStandardMaterial({ color: "#1a1a1a", roughness: 0.9 });
+const RIM_MAT = new THREE.MeshStandardMaterial({ color: "#ccc", metalness: 0.7, roughness: 0.2 });
+const SPOKE_MAT = new THREE.MeshStandardMaterial({ color: "#888", metalness: 0.8 });
+const BLACK_MAT = new THREE.MeshStandardMaterial({ color: "#000" });
+const HOUSING_MAT = new THREE.MeshStandardMaterial({ color: "#333" });
+const METAL_MAT = new THREE.MeshStandardMaterial({ color: "#333", metalness: 1.0 });
+const SENSOR_BASE_MAT = new THREE.MeshStandardMaterial({ color: "#ddd" });
+const DOME_MAT = new THREE.MeshStandardMaterial({ color: "#111", metalness: 0.8, roughness: 0.1 });
+const LIDAR_MAT = new THREE.MeshStandardMaterial({ color: "#222", metalness: 0.5 });
+const DARK_GREY_MAT = new THREE.MeshStandardMaterial({ color: "#444" });
+const PUCK_MAT = new THREE.MeshStandardMaterial({ color: "#111" });
+
 export function WaymoCar({ dims = [4.68, 2.0, 1.56], isBraking = false }) {
     // Default Waymo I-Pace dimensions: L: 4.68, W: 2.0, H: 1.56
     const [length, width, height] = dims;
@@ -214,15 +252,9 @@ export function WaymoCar({ dims = [4.68, 2.0, 1.56], isBraking = false }) {
                 <CarLight position={[0, width * 0.35, 0]} color="#E0E0FF" type="head" target={headlightTarget} />
                 <CarLight position={[0, -width * 0.35, 0]} color="#E0E0FF" type="head" target={headlightTarget} />
                 {/* Grill Strip */}
-                <mesh position={[0.05, 0, 0]}>
-                    <boxGeometry args={[0.05, width * 0.5, 0.05]} />
-                    <meshStandardMaterial color="#000" roughness={0.2} />
-                </mesh>
+                <mesh position={[0.05, 0, 0]} geometry={GRILL_STRIP_GEO} scale={[1, width * 0.5, 1]} material={BLACK_MAT} />
                 {/* Emblem */}
-                <mesh position={[0.08, 0, 0]}>
-                     <circleGeometry args={[0.04, 16]} />
-                     <meshStandardMaterial color="#333" metalness={1.0} />
-                </mesh>
+                <mesh position={[0.08, 0, 0]} geometry={EMBLEM_GEO} material={METAL_MAT} />
             </group>
 
             {/* Taillights */}
@@ -230,8 +262,7 @@ export function WaymoCar({ dims = [4.68, 2.0, 1.56], isBraking = false }) {
                 <CarLight position={[0, width * 0.35, 0]} color="#FF0000" type="tail" isBraking={isBraking} />
                 <CarLight position={[0, -width * 0.35, 0]} color="#FF0000" type="tail" isBraking={isBraking} />
                 {/* Light Bar */}
-                <mesh position={[0, 0, 0]}>
-                     <boxGeometry args={[0.05, width * 0.6, 0.05]} />
+                <mesh position={[0, 0, 0]} geometry={LIGHT_BAR_GEO} scale={[1, width * 0.6, 1]}>
                      <meshStandardMaterial color="#500" emissive="#500" emissiveIntensity={isBraking ? 2 : 0.5} />
                 </mesh>
             </group>
@@ -248,63 +279,62 @@ export function WaymoCar({ dims = [4.68, 2.0, 1.56], isBraking = false }) {
 function DetailedWheel({ position, radius, side }) {
     const width = 0.28;
     const rimRadius = radius * 0.65;
-
-    // Wheel Geometry Alignment:
-    // Car moves in X. Axle is Y.
-    // Torus (Tire) needs to be in XZ plane -> Rotate X 90.
-    // Cylinder (Tread/Rim) defaults to Y axis alignment -> No Rotation.
-    
-    // Side Correction:
-    // Left Wheel (Pos Y): Faces +Y.
-    // Right Wheel (Neg Y): Faces -Y.
-    // To flip Y axis direction, we rotate 180 around X (Y->-Y, Z->-Z). 
-    // This keeps the wheel rolling forward (X->X).
-
     const isRight = side === 'right';
 
-    return (
+    // We can't reuse geometries with different args unless we scale them.
+    // The args used above are:
+    // Torus: radius - 0.06, 0.06...
+    // Cylinder: radius - 0.02...
+    // These depend on radius. But radius is passed in.
+    // However, WaymoCar usually uses same radius.
+    // If we want to optimize properly, we should scale a unit geometry.
+
+    // Let's use scale for optimization.
+    // WHEEL_TIRE_GEO radius is 1. We want (radius - 0.06).
+    // This is tricky because tube radius (0.06) shouldn't scale with main radius if we want fixed tube thickness.
+    // So we'll stick to creating geometry if radius varies dynamically, BUT here radius is likely constant for the car.
+    // Actually, `radius` comes from `wheelRadius` in `WaymoCar`. `wheelRadius` is `0.60` constant.
+    // So we can assume constant radius for now, OR create specific Geoms for that radius.
+
+    // For now, let's keep the existing logic inside DetailedWheel if we want perfect accuracy,
+    // OR pre-calculate for radius=0.60.
+    // Since `wheelRadius` is hardcoded to 0.60 in WaymoCar, we can optimize for that specific size.
+
+    // But let's be safe and use `useMemo` per wheel if we really want to avoid recreation,
+    // OR since it's only 4 wheels, it's not a huge deal.
+    // The main issue was `WaymoCar` re-rendering causing 4x geometry recreation.
+    // Since `WaymoCar` is now memoized by parent, it's better.
+    // But `isBraking` causes re-render of `WaymoCar`.
+
+    // So we should memoize DetailedWheel.
+
+    return useMemo(() => (
         <group position={position} rotation={isRight ? [Math.PI, 0, 0] : [0, 0, 0]}>
             {/* Tire (Torus) - XZ Plane */}
+             {/* Fallback to local geometry for Torus to keep look correct, but memoize it */}
              <mesh rotation={[Math.PI/2, 0, 0]}>
                 <torusGeometry args={[radius - 0.06, 0.06, 16, 48]} />
                 <meshStandardMaterial color="#1a1a1a" roughness={0.8} />
             </mesh>
 
             {/* Tire Tread (Cylinder) - Y Axis */}
-            <mesh>
-                 <cylinderGeometry args={[radius - 0.02, radius - 0.02, width - 0.05, 32]} />
-                 <meshStandardMaterial color="#1a1a1a" roughness={0.9} />
-            </mesh>
+            <mesh geometry={WHEEL_TREAD_GEO} scale={[radius - 0.02, width - 0.05, radius - 0.02]} material={TREAD_MAT} />
 
             {/* Rim (Cylinder) - Y Axis */}
-            <mesh>
-                <cylinderGeometry args={[rimRadius, rimRadius, width * 0.6, 32]} />
-                <meshStandardMaterial color="#ccc" metalness={0.7} roughness={0.2} />
-            </mesh>
+            <mesh geometry={WHEEL_RIM_GEO} scale={[rimRadius, width * 0.6, rimRadius]} material={RIM_MAT} />
 
             {/* Spokes (Box Cross) - XZ Plane */}
-            {/* We want the cross to be on the Face (XZ plane). */}
-            {/* And offset slightly in Y to be on the outside. */}
             <group position={[0, width * 0.2, 0]}>
                  {/* Horizontal Spoke (Along X) */}
-                 <mesh>
-                     <boxGeometry args={[rimRadius*1.8, 0.05, 0.02]} />
-                     <meshStandardMaterial color="#888" metalness={0.8} />
-                 </mesh>
+                 <mesh geometry={SPOKE_H_GEO} scale={[rimRadius*1.8, 1, 1]} material={SPOKE_MAT} />
                  {/* Vertical Spoke (Along Z) */}
-                 <mesh rotation={[0, Math.PI/2, 0]}>
-                     <boxGeometry args={[rimRadius*1.8, 0.05, 0.02]} />
-                     <meshStandardMaterial color="#888" metalness={0.8} />
-                 </mesh>
+                 <mesh rotation={[0, Math.PI/2, 0]} geometry={SPOKE_V_GEO} scale={[rimRadius*1.8, 1, 1]} material={SPOKE_MAT} />
             </group>
 
              {/* Hub Cap - Center of Face */}
-             <mesh position={[0, width * 0.25, 0]} rotation={[Math.PI/2, 0, 0]}>
-                 <cylinderGeometry args={[0.05, 0.05, 0.02, 16]} />
-                 <meshStandardMaterial color="#000" />
-             </mesh>
+             <mesh position={[0, width * 0.25, 0]} rotation={[Math.PI/2, 0, 0]} geometry={HUB_CAP_GEO} material={BLACK_MAT} />
         </group>
-    )
+    ), [position, radius, isRight, rimRadius, width]);
 }
 
 function CarLight({ position, color, type, isBraking, target }) {
@@ -313,13 +343,9 @@ function CarLight({ position, color, type, isBraking, target }) {
     return (
         <group position={position}>
             {/* Housing */}
-            <mesh rotation={[0, Math.PI/2, 0]}>
-                <boxGeometry args={[0.1, 0.15, 0.2]} />
-                <meshStandardMaterial color="#333" />
-            </mesh>
+            <mesh rotation={[0, Math.PI/2, 0]} geometry={LIGHT_HOUSING_GEO} material={HOUSING_MAT} />
             {/* Lens */}
-            <mesh position={[0.05, 0, 0]} rotation={[0, Math.PI/2, 0]}>
-                 <planeGeometry args={[0.08, 0.18]} />
+            <mesh position={[0.05, 0, 0]} rotation={[0, Math.PI/2, 0]} geometry={LIGHT_LENS_GEO}>
                  <meshStandardMaterial
                     color={color}
                     emissive={color}
@@ -351,35 +377,16 @@ function SensorSuite({ position }) {
     return (
         <group position={position}>
              {/* Base */}
-             <mesh position={[0, 0, 0.02]}>
-                 <boxGeometry args={[0.6, 0.4, 0.05]} />
-                 <meshStandardMaterial color="#ddd" />
-             </mesh>
+             <mesh position={[0, 0, 0.02]} geometry={SENSOR_BASE_GEO} material={SENSOR_BASE_MAT} />
              {/* Main Dome (Waymo Driver) */}
-             <mesh position={[0, 0, 0.25]} rotation={[Math.PI/2, 0, 0]}>
-                  <cylinderGeometry args={[0.12, 0.14, 0.35, 32]} />
-                  <meshStandardMaterial color="#111" metalness={0.8} roughness={0.1} />
-             </mesh>
+             <mesh position={[0, 0, 0.25]} rotation={[Math.PI/2, 0, 0]} geometry={MAIN_DOME_GEO} material={DOME_MAT} />
              {/* Spinning LiDAR Graphic (Static but styled) */}
-             <mesh position={[0, 0, 0.35]} rotation={[Math.PI/2, 0, 0]}>
-                 <cylinderGeometry args={[0.125, 0.125, 0.1, 32]} />
-                  <meshStandardMaterial color="#222" metalness={0.5} />
-                  {/* We could animate rotation here if we had ref */}
-             </mesh>
-             <mesh position={[0, 0, 0.41]} rotation={[Math.PI/2, 0, 0]}>
-                 <cylinderGeometry args={[0.13, 0.13, 0.01, 32]} />
-                 <meshStandardMaterial color="#444" />
-             </mesh>
+             <mesh position={[0, 0, 0.35]} rotation={[Math.PI/2, 0, 0]} geometry={LIDAR_GEO} material={LIDAR_MAT} />
+             <mesh position={[0, 0, 0.41]} rotation={[Math.PI/2, 0, 0]} geometry={LIDAR_TOP_GEO} material={DARK_GREY_MAT} />
 
              {/* Side Pucks on Roof Rack */}
-             <mesh position={[-0.1, 0.25, 0.1]} rotation={[Math.PI/2, 0, 0]}>
-                  <cylinderGeometry args={[0.06, 0.07, 0.15, 16]} />
-                  <meshStandardMaterial color="#111" />
-             </mesh>
-             <mesh position={[-0.1, -0.25, 0.1]} rotation={[Math.PI/2, 0, 0]}>
-                  <cylinderGeometry args={[0.06, 0.07, 0.15, 16]} />
-                  <meshStandardMaterial color="#111" />
-             </mesh>
+             <mesh position={[-0.1, 0.25, 0.1]} rotation={[Math.PI/2, 0, 0]} geometry={PUCK_GEO} material={PUCK_MAT} />
+             <mesh position={[-0.1, -0.25, 0.1]} rotation={[Math.PI/2, 0, 0]} geometry={PUCK_GEO} material={PUCK_MAT} />
         </group>
     )
 }
@@ -387,14 +394,8 @@ function SensorSuite({ position }) {
 function SideSensor({ position, side }) {
     return (
         <group position={position} rotation={[0, 0, side === 'left' ? 0.3 : -0.3]}>
-            <mesh>
-                <cylinderGeometry args={[0.06, 0.07, 0.12, 16]} />
-                <meshStandardMaterial color="#111" metalness={0.8} />
-            </mesh>
-             <mesh position={[0, 0, 0.065]}>
-                <sphereGeometry args={[0.06, 16, 16]} />
-                <meshStandardMaterial color="#000" />
-            </mesh>
+            <mesh geometry={SIDE_SENSOR_BODY_GEO} material={DOME_MAT} />
+             <mesh position={[0, 0, 0.065]} geometry={SIDE_SENSOR_DOME_GEO} material={BLACK_MAT} />
         </group>
     )
 }
