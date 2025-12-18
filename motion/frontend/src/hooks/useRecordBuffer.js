@@ -1,4 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  parseMap,
+  calculateCenter,
+  parseAgents,
+  parseTrafficLights,
+  parsePathSamples,
+  parseSdcState,
+  calculateSdcSpeeds,
+  parseScenarioId
+} from '../utils/parsers';
 
 export function useRecordBuffer(baseUrl, bufferLimit = 5) {
   const [currentRecord, setCurrentRecord] = useState(null);
@@ -49,8 +59,25 @@ export function useRecordBuffer(baseUrl, bufferLimit = 5) {
           isStreamDoneRef.current = true;
           console.log('Stream finished');
         } else {
+          // Parse data before adding to buffer
+          const rawData = json.record;
+          const parsedMap = parseMap(rawData);
+          const center = calculateCenter(parsedMap);
+
+          const parsedData = {
+              parsedMap,
+              center,
+              scenarioId: parseScenarioId(parsedMap),
+              parsedAgents: parseAgents(parsedMap, center),
+              parsedTrafficLights: parseTrafficLights(parsedMap, center),
+              parsedPathSamples: parsePathSamples(parsedMap, center),
+              parsedSdcState: parseSdcState(parsedMap, center),
+              sdcSpeeds: calculateSdcSpeeds(parsedMap),
+              raw: rawData // Keep raw just in case
+          };
+
           bufferRef.current.push({
-            record: json.record,
+            data: parsedData,
             fileInfo: json.fileInfo,
             scenarioInfo: json.scenarioInfo
           });
@@ -74,14 +101,14 @@ export function useRecordBuffer(baseUrl, bufferLimit = 5) {
     if (bufferRef.current.length > 0) {
       const next = bufferRef.current.shift();
       setBufferSize(bufferRef.current.length);
-      setCurrentRecord(next); // next is now { record, fileInfo }
+      setCurrentRecord(next); // next is now { data, fileInfo, scenarioInfo }
       return true;
     }
     return false;
   }, []);
 
   return { 
-    data: currentRecord?.record,
+    data: currentRecord?.data, // This is now the PARSED data object
     fileInfo: currentRecord?.fileInfo, 
     scenarioInfo: currentRecord?.scenarioInfo,
     isConnected, 
