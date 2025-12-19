@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { ENVS } from "./constants/environments";
 import { EnvironmentPreloader } from "./components/EnvironmentPreloader";
 import { Canvas, useFrame } from "@react-three/fiber";
@@ -10,22 +10,62 @@ import { CameraRig } from "./components/CameraRig";
 import { TrafficLights } from "./components/TrafficLights";
 import { PathSamples } from "./components/PathSamples";
 import { SdcPathHighlight } from "./components/SdcPathHighlight";
-import { TrafficLightHighlight } from "./components/TrafficLightHighlight";
 
 import { Rain } from "./components/Rain";
 import { Snow } from "./components/Snow";
 import { Dust } from "./components/Dust";
 import { Lightning } from "./components/Lightning";
 
+// Total frames: 10 past + 1 current + 80 future = 91
+const TOTAL_FRAMES = 91;
+
+// Animation Loop Component extracted to avoid re-creation on every render
+const AnimationLoop = ({ frameRef, isPlaying, setIsPlaying, onFinished, sdcSpeeds, frameUiRef, speedUiRef }) => {
+  // Render Counter Ref
+  const renderCounter = useRef(0);
+
+  useFrame((state, delta) => {
+    if (!isPlaying) return;
+
+    // Advance frame
+    const speed = 10;
+    frameRef.current += delta * speed;
+
+    if (frameRef.current >= TOTAL_FRAMES) {
+      // Loop or Finish
+      if (onFinished) {
+        onFinished();
+        setIsPlaying(false); // Stop until reset
+      }
+      frameRef.current = TOTAL_FRAMES - 1;
+    }
+
+    // Imperative UI Updates - Throttled
+    const currentFrameInt = Math.floor(frameRef.current);
+
+    renderCounter.current++;
+
+    if (renderCounter.current % 10 === 0) {
+      if (frameUiRef.current) {
+        frameUiRef.current.innerText = `Frame: ${currentFrameInt} / ${TOTAL_FRAMES}`;
+      }
+      if (speedUiRef.current) {
+        const spd =
+          sdcSpeeds && sdcSpeeds[currentFrameInt] !== undefined
+            ? sdcSpeeds[currentFrameInt]
+            : 0;
+        speedUiRef.current.innerText = `Speed: ${spd.toFixed(2)} m/s`;
+      }
+    }
+  });
+  return null;
+};
+
 export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
   // data is now the Pre-Parsed Object from useRecordBuffer
   // { parsedMap, center, scenarioId, parsedAgents, parsedTrafficLights, parsedPathSamples, parsedSdcState, sdcSpeeds }
 
-  const [variant, setVariant] = useState(0);
   const [cameraName, setCameraName] = useState("");
-
-  // Total frames: 10 past + 1 current + 80 future = 91
-  const TOTAL_FRAMES = 91;
 
   // Refs for UI updates
   const frameUiRef = useRef();
@@ -46,47 +86,29 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
   const frameRef = useRef(0);
   const [isPlaying, setIsPlaying] = useState(true);
 
-  // Animation Loop Component
-  const AnimationLoop = () => {
-    // Render Counter Ref
-    const renderCounter = useRef(0);
+  // Compute env/weather/variant deterministically or via useMemo
+  // Use scenarioId as a seed if available, or just random but memoized per data instance
+  const { variant, envName, weather } = useMemo(() => {
+    // If data is null, return defaults
+    if (!data) return { variant: 0, envName: "night", weather: "clear" };
 
-    useFrame((state, delta) => {
-      if (!isPlaying) return;
+    const keys = Object.keys(ENVS);
+    const randomKey = keys[Math.floor(Math.random() * keys.length)];
 
-      // Advance frame
-      const speed = 10;
-      frameRef.current += delta * speed;
+    // Weather Probability: 80% Clear, 20% Special
+    const r = Math.random();
+    let w = "clear";
+    if (r > 0.8) {
+      const types = ["rain", "snow", "fog", "dust", "storm"];
+      w = types[Math.floor(Math.random() * types.length)];
+    }
 
-      if (frameRef.current >= TOTAL_FRAMES) {
-        // Loop or Finish
-        if (onFinished) {
-          onFinished();
-          setIsPlaying(false); // Stop until reset
-        }
-        frameRef.current = TOTAL_FRAMES - 1;
-      }
-
-      // Imperative UI Updates - Throttled
-      const currentFrameInt = Math.floor(frameRef.current);
-
-      renderCounter.current++;
-
-      if (renderCounter.current % 10 === 0) {
-        if (frameUiRef.current) {
-          frameUiRef.current.innerText = `Frame: ${currentFrameInt} / ${TOTAL_FRAMES}`;
-        }
-        if (speedUiRef.current) {
-          const spd =
-            sdcSpeeds && sdcSpeeds[currentFrameInt] !== undefined
-              ? sdcSpeeds[currentFrameInt]
-              : 0;
-          speedUiRef.current.innerText = `Speed: ${spd.toFixed(2)} m/s`;
-        }
-      }
-    });
-    return null;
-  };
+    return {
+        variant: Math.floor(Math.random() * 100),
+        envName: randomKey,
+        weather: w
+    };
+  }, [data]); // Re-compute only when data changes (new scenario)
 
   // Reset when data changes
   useEffect(() => {
@@ -98,29 +120,26 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
       if (speedUiRef.current && sdcSpeeds && sdcSpeeds[0])
         speedUiRef.current.innerText = `Speed: ${sdcSpeeds[0].toFixed(2)} m/s`;
 
-      setVariant(Math.floor(Math.random() * 100));
       setIsPlaying(true);
     }
   }, [data, sdcSpeeds]);
 
-  const [envName, setEnvName] = useState("night");
-  const [weather, setWeather] = useState("clear"); // clear, rain, snow, fog, dust, storm
 
-  // Auto-select random environment and weather on data load
-  useEffect(() => {
-    const keys = Object.keys(ENVS);
-    const randomKey = keys[Math.floor(Math.random() * keys.length)];
-    setEnvName(randomKey);
-
-    // Weather Probability: 80% Clear, 20% Special
-    const r = Math.random();
-    if (r > 0.8) {
-      const types = ["rain", "snow", "fog", "dust", "storm"];
-      setWeather(types[Math.floor(Math.random() * types.length)]);
-    } else {
-      setWeather("clear");
-    }
-  }, [data]);
+  // Memoize CameraRig Logic
+  const cameraRigComponent = useMemo(() => {
+    const isAuto = new URLSearchParams(window.location.search).get("autoCamera") !== "false";
+    return parsedMap ? (
+        <CameraRig
+          map={parsedMap}
+          agents={parsedAgents}
+          frameRef={frameRef}
+          center={center}
+          variant={variant}
+          isAuto={isAuto}
+          onCameraChange={setCameraName}
+        />
+    ) : null;
+  }, [parsedMap, parsedAgents, center, variant]);
 
   return (
     <div
@@ -154,7 +173,15 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
           <fog attach="fog" args={["#050510", 10, 100]} />
         )}
         <OrbitControls makeDefault />
-        <AnimationLoop />
+        <AnimationLoop
+            frameRef={frameRef}
+            isPlaying={isPlaying}
+            setIsPlaying={setIsPlaying}
+            onFinished={onFinished}
+            sdcSpeeds={sdcSpeeds}
+            frameUiRef={frameUiRef}
+            speedUiRef={speedUiRef}
+        />
         <EffectComposer disableNormalPass>
           <Bloom
             luminanceThreshold={1.0}
@@ -199,24 +226,8 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
         {weather === "snow" && <Snow />}
         {weather === "dust" && <Dust />}
         {weather === "storm" && <Lightning />}
-        {(() => {
-          const isAuto =
-            new URLSearchParams(window.location.search).get("autoCamera") !==
-            "false";
-          return (
-            parsedMap && (
-              <CameraRig
-                map={parsedMap}
-                agents={parsedAgents}
-                frameRef={frameRef}
-                center={center}
-                variant={variant}
-                isAuto={isAuto}
-                onCameraChange={setCameraName}
-              />
-            )
-          );
-        })()}
+
+        {cameraRigComponent}
       </Canvas>
 
       {/* Minimal Info */}

@@ -220,8 +220,7 @@ const VEC3_B = new THREE.Vector3();
 // For getAgentState caching/reuse
 const _agentState = { x: 0, y: 0, z: 0, yaw: 0, accel: 0, speed: 0 };
 
-
-export function Agents({ agents, trafficLights, frameRef }) {
+export const Agents = React.memo(function Agents({ agents, trafficLights, frameRef }) {
 
     // ... (split agents logic - no change) ...
     const { sdc, peds, cyclists, vehicles, others } = useMemo(() => {
@@ -616,7 +615,7 @@ export function Agents({ agents, trafficLights, frameRef }) {
             )}
         </group>
     );
-}
+});
 
 // AgentItem only used for SDC now
 function AgentItem({ agent, frameRef }) {
