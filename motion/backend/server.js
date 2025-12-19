@@ -235,7 +235,12 @@ function pruneData(record) {
 
     // Detect Input Type and Iterate
     if (Array.isArray(originalMap)) {
-        originalMap.forEach(entry => {
+        // Optimized loop with early exit if we found all features (heuristic: count > size?)
+        // Actually, we don't know how many unique features are in originalMap that match whitelist.
+        // But we can iterate.
+        const len = originalMap.length;
+        for (let i = 0; i < len; i++) {
+            const entry = originalMap[i];
             let k, v;
             if (Array.isArray(entry)) {
                  k = entry[0]; v = entry[1];
@@ -249,7 +254,7 @@ function pruneData(record) {
                 prunedMap[k] = v;
                 foundAny = true;
             }
-        });
+        }
     } else if (originalMap instanceof Map) {
         for (let [k, v] of originalMap) {
             if (FEATURE_WHITELIST.has(k)) {
@@ -262,13 +267,14 @@ function pruneData(record) {
         // Instead of Object.keys(originalMap) which is O(N) where N is all keys,
         // we iterate the whitelist O(M) where M is whitelist size.
         // Assuming N >> M.
-        FEATURE_WHITELIST_ARRAY.forEach(k => {
+        for (let i = 0; i < FEATURE_WHITELIST_ARRAY.length; i++) {
+             const k = FEATURE_WHITELIST_ARRAY[i];
              // We use Object.prototype.hasOwnProperty because originalMap might be created with null prototype or have shadowed props
              if (Object.prototype.hasOwnProperty.call(originalMap, k)) {
                  prunedMap[k] = originalMap[k];
                  foundAny = true;
              }
-        });
+        }
     }
 
     if (!foundAny) {

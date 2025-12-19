@@ -220,6 +220,77 @@ const VEC3_B = new THREE.Vector3();
 // For getAgentState caching/reuse
 const _agentState = { x: 0, y: 0, z: 0, yaw: 0, accel: 0, speed: 0 };
 
+// Helper to get agent state outside useFrame callback
+const getAgentState = (agent, currentFrame) => {
+    const traj = agent.trajectory;
+    const idx1 = Math.floor(currentFrame);
+    // Clamp idx2
+    const len = traj.length;
+    if (idx1 >= len) return null; // Should not happen usually
+
+    const idx2 = Math.min(idx1 + 1, len - 1);
+    const alpha = currentFrame - idx1;
+    const step1 = traj[idx1];
+
+    if (!step1) return null;
+
+    const step2 = traj[idx2];
+
+    if (step2 && step1 !== step2) {
+         // Manual Lerp to avoid allocations
+         _agentState.x = step1.x + (step2.x - step1.x) * alpha;
+         _agentState.y = step1.y + (step2.y - step1.y) * alpha;
+         _agentState.z = step1.z + (step2.z - step1.z) * alpha;
+
+         let dYaw = step2.yaw - step1.yaw;
+         while (dYaw > Math.PI) dYaw -= 2 * Math.PI;
+         while (dYaw < -Math.PI) dYaw += 2 * Math.PI;
+         _agentState.yaw = step1.yaw + dYaw * alpha;
+
+         // Velocities/Accel can be lerped if needed, but for rendering pos/rot only above matters
+         // Braking logic needs accel
+         const a1 = step1.accel || 0;
+         const a2 = step2.accel || 0;
+         _agentState.accel = a1 + (a2 - a1) * alpha;
+    } else {
+         _agentState.x = step1.x;
+         _agentState.y = step1.y;
+         _agentState.z = step1.z;
+         _agentState.yaw = step1.yaw;
+         _agentState.accel = step1.accel || 0;
+    }
+    return _agentState;
+};
+
+const updateInstance = (idx, agent, refs, currentFrame, scaleOverride) => {
+    const st = getAgentState(agent, currentFrame);
+    if (!st) {
+         TEMP_OBJECT.scale.set(0,0,0);
+         TEMP_OBJECT.updateMatrix();
+         refs.forEach(r => r.current && r.current.setMatrixAt(idx, TEMP_OBJECT.matrix));
+         return;
+    }
+
+    // Fix Floating: Waymo Z is Centroid. Geometries are Bottom-Aligned.
+    // Subtract half-height.
+    const h = agent.dims[2] || 1.5;
+    TEMP_OBJECT.position.set(st.x, st.y, st.z - h/2);
+
+    TEMP_OBJECT.rotation.set(0, 0, st.yaw);
+    if (scaleOverride) {
+         TEMP_OBJECT.scale.set(scaleOverride[0], scaleOverride[1], scaleOverride[2]);
+    } else {
+         TEMP_OBJECT.scale.set(1, 1, 1);
+    }
+    TEMP_OBJECT.updateMatrix();
+
+    refs.forEach(r => {
+        if(r.current) {
+            r.current.setMatrixAt(idx, TEMP_OBJECT.matrix);
+        }
+    });
+};
+
 export const Agents = React.memo(function Agents({ agents, trafficLights, frameRef }) {
 
     // ... (split agents logic - no change) ...
@@ -316,81 +387,12 @@ export const Agents = React.memo(function Agents({ agents, trafficLights, frameR
         if (!frameRef) return;
         const currentFrame = frameRef.current;
         
-        // helper to get state (optimized)
-        const getAgentState = (agent) => {
-            const traj = agent.trajectory;
-            const idx1 = Math.floor(currentFrame);
-            // Clamp idx2
-            const len = traj.length;
-            if (idx1 >= len) return null; // Should not happen usually
-
-            const idx2 = Math.min(idx1 + 1, len - 1);
-            const alpha = currentFrame - idx1;
-            const step1 = traj[idx1];
-            
-            if (!step1) return null;
-            
-            const step2 = traj[idx2];
-
-            if (step2 && step1 !== step2) {
-                 // Manual Lerp to avoid allocations
-                 _agentState.x = step1.x + (step2.x - step1.x) * alpha;
-                 _agentState.y = step1.y + (step2.y - step1.y) * alpha;
-                 _agentState.z = step1.z + (step2.z - step1.z) * alpha;
-
-                 let dYaw = step2.yaw - step1.yaw;
-                 while (dYaw > Math.PI) dYaw -= 2 * Math.PI;
-                 while (dYaw < -Math.PI) dYaw += 2 * Math.PI;
-                 _agentState.yaw = step1.yaw + dYaw * alpha;
-
-                 // Velocities/Accel can be lerped if needed, but for rendering pos/rot only above matters
-                 // Braking logic needs accel
-                 const a1 = step1.accel || 0;
-                 const a2 = step2.accel || 0;
-                 _agentState.accel = a1 + (a2 - a1) * alpha;
-            } else {
-                 _agentState.x = step1.x;
-                 _agentState.y = step1.y;
-                 _agentState.z = step1.z;
-                 _agentState.yaw = step1.yaw;
-                 _agentState.accel = step1.accel || 0;
-            }
-            return _agentState;
-        };
-        
-        const updateInstance = (idx, agent, refs, scaleOverride) => {
-            const st = getAgentState(agent);
-            if (!st) {
-                 TEMP_OBJECT.scale.set(0,0,0);
-                 TEMP_OBJECT.updateMatrix();
-                 refs.forEach(r => r.current && r.current.setMatrixAt(idx, TEMP_OBJECT.matrix));
-                 return;
-            }
-            
-            // Fix Floating: Waymo Z is Centroid. Geometries are Bottom-Aligned.
-            // Subtract half-height.
-            const h = agent.dims[2] || 1.5;
-            TEMP_OBJECT.position.set(st.x, st.y, st.z - h/2);
-            
-            TEMP_OBJECT.rotation.set(0, 0, st.yaw);
-            if (scaleOverride) {
-                 TEMP_OBJECT.scale.set(scaleOverride[0], scaleOverride[1], scaleOverride[2]);
-            } else {
-                 TEMP_OBJECT.scale.set(1, 1, 1);
-            }
-            TEMP_OBJECT.updateMatrix();
-            
-            refs.forEach(r => {
-                if(r.current) {
-                    r.current.setMatrixAt(idx, TEMP_OBJECT.matrix);
-                }
-            });
-        };
-
         // Vehicles
         if (vehicleMeshRef.current) {
-             vehicles.forEach((agent, i) => {
-                 const st = getAgentState(agent);
+             const vehiclesLen = vehicles.length;
+             for (let i = 0; i < vehiclesLen; i++) {
+                 const agent = vehicles[i];
+                 const st = getAgentState(agent, currentFrame);
                  if(!st) {
                      // Hide vehicle
                      TEMP_OBJECT.scale.set(0,0,0);
@@ -398,7 +400,7 @@ export const Agents = React.memo(function Agents({ agents, trafficLights, frameR
                      vehicleMeshRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
 
                      if (vehicleWireframeRef.current) vehicleWireframeRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
-                     return;
+                     continue;
                  }
                  
                  // Fix Floating: Offset Z by Half Height
@@ -443,7 +445,7 @@ export const Agents = React.memo(function Agents({ agents, trafficLights, frameR
                      }
                      vehicleBrakeLightRef.current.setColorAt(i, TEMP_COLOR);
                  }
-             });
+             }
              vehicleMeshRef.current.instanceMatrix.needsUpdate = true;
              // vehicleMeshRef color updated in useEffect
 
@@ -460,9 +462,10 @@ export const Agents = React.memo(function Agents({ agents, trafficLights, frameR
         // ... (peds/cyclists update - same as before) ...
         // Pedestrians
         if (peds.length > 0) {
-            peds.forEach((agent, i) => {
-                 updateInstance(i, agent, [pedPantsRef, pedShirtRef, pedSkinRef]);
-            });
+            const pedsLen = peds.length;
+            for (let i = 0; i < pedsLen; i++) {
+                 updateInstance(i, peds[i], [pedPantsRef, pedShirtRef, pedSkinRef], currentFrame);
+            }
             [pedPantsRef, pedShirtRef, pedSkinRef].forEach(r => {
                  if (r.current) {
                      r.current.instanceMatrix.needsUpdate = true;
@@ -472,12 +475,14 @@ export const Agents = React.memo(function Agents({ agents, trafficLights, frameR
         
         // Cyclists
         if (cyclists.length > 0) {
-            cyclists.forEach((agent, i) => {
-                 updateInstance(i, agent, [cycFrameRef, cycWheelRef, cycClothesRef, cycSkinRef]);
+            const cyclistsLen = cyclists.length;
+            for (let i = 0; i < cyclistsLen; i++) {
+                 const agent = cyclists[i];
+                 updateInstance(i, agent, [cycFrameRef, cycWheelRef, cycClothesRef, cycSkinRef], currentFrame);
 
                  // Wireframe for Cyclist
                  if (cycWireframeRef.current && agent.dims) {
-                       const st = getAgentState(agent);
+                       const st = getAgentState(agent, currentFrame);
                        if (st) {
                            TEMP_OBJECT.position.set(st.x, st.y, st.z + agent.dims[2] / 2); // Center on volume (assuming st.z is ground)
                            TEMP_OBJECT.rotation.set(0, 0, st.yaw);
@@ -490,7 +495,7 @@ export const Agents = React.memo(function Agents({ agents, trafficLights, frameR
                            cycWireframeRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
                        }
                  }
-            });
+            }
              [cycFrameRef, cycWheelRef, cycClothesRef, cycSkinRef].forEach(r => {
                  if (r.current) {
                      r.current.instanceMatrix.needsUpdate = true;
@@ -503,13 +508,15 @@ export const Agents = React.memo(function Agents({ agents, trafficLights, frameR
 
         // Others (Optimized with InstancedMesh)
         if (others.length > 0 && othersMeshRef.current) {
-             others.forEach((agent, i) => {
-                 const st = getAgentState(agent);
+             const othersLen = others.length;
+             for (let i = 0; i < othersLen; i++) {
+                 const agent = others[i];
+                 const st = getAgentState(agent, currentFrame);
                  if(!st) {
                      TEMP_OBJECT.scale.set(0,0,0);
                      TEMP_OBJECT.updateMatrix();
                      othersMeshRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
-                     return;
+                     continue;
                  }
 
                  // Generic boxes are unit cubes (1x1x1) bottom-aligned.
@@ -520,7 +527,7 @@ export const Agents = React.memo(function Agents({ agents, trafficLights, frameR
                  TEMP_OBJECT.scale.set(agent.dims[0], agent.dims[1], agent.dims[2]);
                  TEMP_OBJECT.updateMatrix();
                  othersMeshRef.current.setMatrixAt(i, TEMP_OBJECT.matrix);
-             });
+             }
              othersMeshRef.current.instanceMatrix.needsUpdate = true;
         }
 
