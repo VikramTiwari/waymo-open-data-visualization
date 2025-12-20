@@ -12,10 +12,57 @@ function mulberry32(a) {
     }
 }
 
-export function Dust({ count = 3000 }) {
-    const meshRef = useRef();
+const vertexShader = `
+  uniform float uTime;
 
-    const pointsGeometry = useMemo(() => {
+  // Attributes
+  attribute vec3 aVelocity; // vx, vy, vz
+
+  void main() {
+    // Current Position = Initial Position + Velocity * Time
+    vec3 pos = position + aVelocity * uTime;
+
+    // Wrapping
+    // X: -50 to 50 (Range 100). Center 0.
+    // To use mod(val, range), we shift to 0..range, mod, then shift back.
+
+    float x = mod(pos.x + 50.0, 100.0) - 50.0;
+    float y = mod(pos.y + 50.0, 100.0) - 50.0;
+
+    // Z: 0 to 40 (Range 40).
+    float z = mod(pos.z, 40.0);
+
+    vec4 mvPosition = modelViewMatrix * vec4(x, y, z, 1.0);
+    gl_Position = projectionMatrix * mvPosition;
+
+    // Size Attenuation
+    // Standard PointsMaterial formula: size * ( scale / - mvPosition.z )
+    // We'll just use a constant or simple attenuation.
+    gl_PointSize = 4.0 * (10.0 / -mvPosition.z);
+  }
+`;
+
+const fragmentShader = `
+  uniform vec3 uColor;
+  uniform float uOpacity;
+
+  void main() {
+    // Soft circle
+    vec2 c = gl_PointCoord - vec2(0.5);
+    float dist = length(c);
+    if (dist > 0.5) discard;
+
+    // Slight gradient for fluffiness
+    float alpha = uOpacity * (1.0 - dist * 2.0);
+
+    gl_FragColor = vec4(uColor, alpha);
+  }
+`;
+
+export function Dust({ count = 3000 }) {
+    const materialRef = useRef();
+
+    const geometry = useMemo(() => {
         const rand = mulberry32(78901); 
         const positions = [];
         const velocities = []; 
@@ -44,47 +91,25 @@ export function Dust({ count = 3000 }) {
         return geo;
     }, [count]);
 
-    useFrame((state, delta) => {
-        if (!meshRef.current) return;
-
-        const posAttr = meshRef.current.geometry.attributes.position;
-        const velAttr = meshRef.current.geometry.attributes.aVelocity;
-        const count = posAttr.count;
-        
-        for (let i = 0; i < count; i++) {
-            let x = posAttr.getX(i);
-            let y = posAttr.getY(i);
-            let z = posAttr.getZ(i);
-            
-            const vx = velAttr.getX(i);
-            const vy = velAttr.getY(i);
-            const vz = velAttr.getZ(i);
-
-            x += vx * delta;
-            y += vy * delta;
-            z += vz * delta;
-
-            // Loop smoothly around boundaries (simple wrap)
-            if (z < 0) z = 40;
-            if (z > 40) z = 0;
-            if (x < -50) x = 50;
-            if (x > 50) x = -50;
-            if (y < -50) y = 50;
-            if (y > 50) y = -50;
-
-            posAttr.setXYZ(i, x, y, z);
+    useFrame((state) => {
+        if (materialRef.current) {
+            materialRef.current.uniforms.uTime.value = state.clock.elapsedTime;
         }
-        posAttr.needsUpdate = true;
     });
 
     return (
-        <points ref={meshRef} geometry={pointsGeometry}>
-            <pointsMaterial 
-                color="#e6c288" 
-                size={0.15} 
-                transparent 
-                opacity={0.6} 
-                depthWrite={false} 
+        <points geometry={geometry}>
+            <shaderMaterial
+                ref={materialRef}
+                vertexShader={vertexShader}
+                fragmentShader={fragmentShader}
+                uniforms={{
+                    uTime: { value: 0 },
+                    uColor: { value: new THREE.Color('#e6c288') },
+                    uOpacity: { value: 0.6 }
+                }}
+                transparent={true}
+                depthWrite={false}
                 blending={THREE.NormalBlending}
             />
         </points>
