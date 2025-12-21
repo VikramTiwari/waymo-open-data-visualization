@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useRef, useMemo } from "react";
 import { ENVS } from "./constants/environments";
 import { EnvironmentPreloader } from "./components/EnvironmentPreloader";
 import { Canvas, useFrame } from "@react-three/fiber";
@@ -92,37 +92,40 @@ export function Scene({ data, fileInfo, scenarioInfo, onFinished }) {
     // If data is null, return defaults
     if (!data) return { variant: 0, envName: "night", weather: "clear" };
 
+    // Simple seeded random to ensure purity and consistency
+    const seedStr = scenarioId || "seed";
+    let h = 0x811c9dc5;
+    for (let i = 0; i < seedStr.length; i++) {
+        h ^= seedStr.charCodeAt(i);
+        h = Math.imul(h, 0x01000193);
+    }
+    const seed = h >>> 0;
+
+    const random = (offset = 0) => {
+        const x = Math.sin(seed + offset) * 10000;
+        return x - Math.floor(x);
+    };
+
     const keys = Object.keys(ENVS);
-    const randomKey = keys[Math.floor(Math.random() * keys.length)];
+    const randomKey = keys[Math.floor(random(0) * keys.length)];
 
     // Weather Probability: 80% Clear, 20% Special
-    const r = Math.random();
+    const r = random(1);
     let w = "clear";
     if (r > 0.8) {
       const types = ["rain", "snow", "fog", "dust", "storm"];
-      w = types[Math.floor(Math.random() * types.length)];
+      w = types[Math.floor(random(2) * types.length)];
     }
 
     return {
-        variant: Math.floor(Math.random() * 100),
+        variant: Math.floor(random(3) * 100),
         envName: randomKey,
         weather: w
     };
-  }, [data]); // Re-compute only when data changes (new scenario)
+  }, [data, scenarioId]); // Re-compute only when data changes (new scenario)
 
-  // Reset when data changes
-  useEffect(() => {
-    if (data) {
-      frameRef.current = 0;
-      // Also reset UI
-      if (frameUiRef.current)
-        frameUiRef.current.innerText = `Frame: 0 / ${TOTAL_FRAMES}`;
-      if (speedUiRef.current && sdcSpeeds && sdcSpeeds[0])
-        speedUiRef.current.innerText = `Speed: ${sdcSpeeds[0].toFixed(2)} m/s`;
-
-      setIsPlaying(true);
-    }
-  }, [data, sdcSpeeds]);
+  // No need for reset effect as the component is re-mounted when scenario changes (key prop in App.jsx)
+  // frameRef is initialized to 0, and isPlaying defaults to true.
 
 
   // Memoize CameraRig Logic
