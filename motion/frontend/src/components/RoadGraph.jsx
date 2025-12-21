@@ -16,8 +16,11 @@ const TEMP_VEC4 = new THREE.Vector3();
 function createRibbonGeometry(points, width, isDashed = false, dashSize = 2, gapSize = 1.5, zOffset = 0) {
     if (points.length < 2) return null;
 
+    // Optimization: Pre-calculate size where possible, but points loop makes it dynamic for dashed
+    // For solid, we know exactly: (N-1) quads = 4 * (N-1) vertices
+    // We can use array push for flexibility as max size isn't huge per segment
     const vertices = [];
-    const indices = []; // Uint16 or Uint32? Standard JS array fine for Three
+    const indices = [];
     const uvs = [];
 
     // Helper to add a quad
@@ -31,13 +34,9 @@ function createRibbonGeometry(points, width, isDashed = false, dashSize = 2, gap
         
         // Vertices
         // TL (0), TR (1), BL (2), BR (3) relative to segment
-        // 0: P1 + Left
-        // 1: P1 - Left (Right)
-        // 2: P2 + Left
-        // 3: P2 - Left (Right)
         
-        const dx = TEMP_VEC2.x * w / 2;
-        const dy = TEMP_VEC2.y * w / 2;
+        const dx = TEMP_VEC2.x * w * 0.5;
+        const dy = TEMP_VEC2.y * w * 0.5;
 
         const baseIdx = vertices.length / 3;
 
@@ -51,10 +50,7 @@ function createRibbonGeometry(points, width, isDashed = false, dashSize = 2, gap
         vertices.push(p2.x - dx, p2.y - dy, p2.z + zOffset);
 
         // UVs (Simple 0-1)
-        uvs.push(0, 0);
-        uvs.push(1, 0);
-        uvs.push(0, 1);
-        uvs.push(1, 1);
+        uvs.push(0, 0, 1, 0, 0, 1, 1, 1);
 
         // Indices: 0, 2, 1 and 1, 2, 3
         indices.push(baseIdx, baseIdx + 2, baseIdx + 1);
@@ -85,7 +81,6 @@ function createRibbonGeometry(points, width, isDashed = false, dashSize = 2, gap
                     const endT = (distOnSeg + drawLen) / segLen;
                     
                     // Use TEMP_VEC3 and TEMP_VEC4 for startP and endP
-                    // NOTE: addQuad uses VEC1/VEC2 internally, so VEC3/VEC4 are safe to pass as args
                     TEMP_VEC3.lerpVectors(p1, p2, startT);
                     TEMP_VEC4.lerpVectors(p1, p2, endT);
                     
@@ -105,42 +100,57 @@ function createRibbonGeometry(points, width, isDashed = false, dashSize = 2, gap
             }
         }
     } else {
-        // Solid Strip - Continuous Mesh
-        // This is slightly better than quads if we want smooth joins, 
-        // but for road ribbons, simple quads usually suffice or "strip" logic.
-        // Let's use the strip logic for solid to match previous behavior 
-        // (createSingleStrip function was doing this). 
-        // But we want to inline it or use the same buffer logic.
+        // Solid Strip - Optimized
+        // Pre-allocate arrays for solid strip
+        const numPoints = points.length;
         
-        // Re-implement solid strip logic here to return similar structure
-        for (let i = 0; i < points.length; i++) {
+        // We need 2 vertices per point (Left/Right)
+        // 2 * numPoints vertices
+        // But the previous implementation duplicated vertices per segment (4 per quad).
+        // A triangle strip uses fewer vertices: 2 * numPoints.
+        // Let's implement a continuous strip to reduce vertex count by half.
+        // Vertices: [L0, R0, L1, R1, ...]
+        // Indices: (0, 2, 1), (1, 2, 3), (2, 4, 3), (3, 4, 5) ...
+
+        // However, to support flat shading or UVs cleanly per segment, separate quads are sometimes preferred.
+        // But for road ribbons, continuous is better.
+
+        // Let's stick to the separate quads logic but pre-calc size if we wanted.
+        // Actually, let's optimize to use shared vertices for smooth connections.
+
+        for (let i = 0; i < numPoints; i++) {
             const p = points[i];
             
             // Calculate tangent into TEMP_VEC1
             if (i === 0) {
                 TEMP_VEC1.subVectors(points[i + 1], p).normalize();
-            } else if (i === points.length - 1) {
+            } else if (i === numPoints - 1) {
                 TEMP_VEC1.subVectors(p, points[i - 1]).normalize();
             } else {
-                TEMP_VEC1.subVectors(points[i + 1], points[i - 1]).normalize();
+                // Average tangent for smooth join
+                TEMP_VEC3.subVectors(points[i + 1], p).normalize();
+                TEMP_VEC4.subVectors(p, points[i - 1]).normalize();
+                TEMP_VEC1.addVectors(TEMP_VEC3, TEMP_VEC4).normalize();
             }
 
             // Normal into TEMP_VEC2
             TEMP_VEC2.set(-TEMP_VEC1.y, TEMP_VEC1.x, 0).normalize();
-            const dx = TEMP_VEC2.x * width / 2;
-            const dy = TEMP_VEC2.y * width / 2;
+            const dx = TEMP_VEC2.x * width * 0.5;
+            const dy = TEMP_VEC2.y * width * 0.5;
 
             vertices.push(p.x + dx, p.y + dy, p.z + zOffset); // Left
             vertices.push(p.x - dx, p.y - dy, p.z + zOffset); // Right
             
-            uvs.push(0, 0);
-            uvs.push(1, 0);
+            uvs.push(0, 0, 1, 0); // Simplified UVs
+        }
 
-            if (i < points.length - 1) {
-                const base = i * 2;
-                indices.push(base, base + 2, base + 1);
-                indices.push(base + 1, base + 2, base + 3);
-            }
+        // Generate indices for strip
+        for (let i = 0; i < numPoints - 1; i++) {
+            const base = i * 2;
+            // Triangle 1: L0, L1, R0 -> base, base+2, base+1
+            indices.push(base, base + 2, base + 1);
+            // Triangle 2: R0, L1, R1 -> base+1, base+2, base+3
+            indices.push(base + 1, base + 2, base + 3);
         }
     }
 
@@ -207,13 +217,9 @@ function RoadGraphComponent({ map, center }) {
             }
         }
         
-        // Speed Bumps - Use raw points too if we want, but curves are okay for rare items.
-        // Actually, let's keep curve for speedbumps (rare) or remove? 
-        // Let's remove curve dependency completely for consistence.
-        // Pre-calculate speed bump geometries
+        // Speed Bumps
         const speedBumpsList = Object.values(speedBumpsMap).map(points => {
             if (points.length < 2) return null;
-            // Bumps slightly elevated
             const geo = createRibbonGeometry(points, 0.4, false, 0, 0, 0.05);
             if (!geo) return null;
             return { geometry: geo };
@@ -254,7 +260,6 @@ function RoadGraphComponent({ map, center }) {
             const style = getLaneStyle(type);
 
             pointsList.forEach(points => {
-                 // Lanes at Z=0 relative to road surface
                  const geo = createRibbonGeometry(points, style.width, false, 0, 0, 0);
                  if (geo) geometries.push(geo);
             });
@@ -275,7 +280,6 @@ function RoadGraphComponent({ map, center }) {
         // Group by style key
         const groups = {};
         
-        // Define style key helper
         const getStyleKey = (s) => `${s.color}-${s.width}-${s.dash}-${s.dashSize}-${s.gapSize}`;
 
         markings.forEach(seg => {
@@ -283,14 +287,11 @@ function RoadGraphComponent({ map, center }) {
             const key = getStyleKey(style);
             if (!groups[key]) groups[key] = { style, geometries: [] };
             
-            // Convert pixel width to meters approximate
-            // 1px approx 0.1m, 2 -> 0.15m, 4 -> 0.3m, 6 -> 0.5m
             let meterWidth = 0.1;
             if (style.width >= 6) meterWidth = 0.5;
             else if (style.width >= 4) meterWidth = 0.3;
             else if (style.width >= 2) meterWidth = 0.15;
             
-            // Markings slightly elevated +0.02
             const geo = createRibbonGeometry(seg.points, meterWidth, style.dash, style.dashSize, style.gapSize, 0.02);
             if (geo) groups[key].geometries.push(geo);
         });
@@ -311,42 +312,24 @@ function RoadGraphComponent({ map, center }) {
     const stopSignMesh = useMemo(() => {
         if (stopSigns.length === 0) return null;
 
-        // 1. Create Pole Geometry
-        // Vertical Cylinder. Radius 0.05m, Height 2.2m.
-        // Base at 0, Top at 2.2.
-        // CylinderGeometry(0.05, 0.05, 2.2) default center at (0,0,0) (so -1.1 to 1.1)
-        // Rotate X 90 -> Vertical (Z-up).
-        // Translate Z +1.1 -> Base at 0, Top at 2.2.
-        // 1. Create Pole Geometry
-        // Vertical Cylinder. Radius 0.05m, Height 3m.
-        // Assumes data point is at the sign (elevated). Extend pole down.
-        // Rotate X 90 -> Vertical (Z-up).
-        // Range [-1.5, 1.5] -> Translate Z -1.5 -> [-3.0, 0]
         const poleGeo = new THREE.CylinderGeometry(0.05, 0.05, 3.0, 8);
         poleGeo.rotateX(Math.PI / 2);
         poleGeo.translate(0, 0, -1.5);
 
-        // 2. Create Sign Geometry (Octagon)
-        // Position at Z=0 (The data point)
         const signGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.05, 8);
         signGeo.rotateZ(Math.PI / 2);
-        // signGeo.translate(0, 0, 0); // Centered at data point
 
-        // 3. Merge geometries with groups
         const mergedGeo = BufferGeometryUtils.mergeGeometries([poleGeo, signGeo], false);
         
-        // Add groups
         mergedGeo.clearGroups();
-        // Use indices count
         const poleIndexCount = poleGeo.index.count;
         const signIndexCount = signGeo.index.count;
 
         mergedGeo.addGroup(0, poleIndexCount, 0);
-        mergedGeo.addGroup(poleIndexCount, signIndexCount, 1); // Material 1 (Sign)
+        mergedGeo.addGroup(poleIndexCount, signIndexCount, 1);
 
-        // Materials
         const poleMat = new THREE.MeshStandardMaterial({ color: '#888888', roughness: 0.8 });
-        const signMat = new THREE.MeshBasicMaterial({ color: '#ff0000' }); // Basic for bright red
+        const signMat = new THREE.MeshBasicMaterial({ color: '#ff0000' });
 
         const mesh = new THREE.InstancedMesh(mergedGeo, [poleMat, signMat], stopSigns.length);
         
@@ -354,17 +337,12 @@ function RoadGraphComponent({ map, center }) {
 
         stopSigns.forEach((sign, i) => {
             dummy.position.copy(sign.pos);
-
-            // Orientation
             if (sign.dir) {
-                // Calculate Yaw from dir
                 const yaw = Math.atan2(sign.dir.y, sign.dir.x);
-                // Rotate around Z axis (which is up)
                 dummy.rotation.set(0, 0, yaw);
             } else {
                 dummy.rotation.set(0, 0, 0);
             }
-
             dummy.updateMatrix();
             mesh.setMatrixAt(i, dummy.matrix);
         });
@@ -386,7 +364,7 @@ function RoadGraphComponent({ map, center }) {
                         side={THREE.DoubleSide}
                         polygonOffset
                         polygonOffsetFactor={4}
-                        depthWrite={false} // Prevent Z-fighting on overlaps
+                        depthWrite={false}
                         roughness={0.8}
                         metalness={0.2}
                     />
@@ -402,7 +380,7 @@ function RoadGraphComponent({ map, center }) {
                         opacity={group.style.opacity}
                         side={THREE.DoubleSide}
                         polygonOffset
-                        polygonOffsetFactor={2} // Markings (2) vs Lanes (4)
+                        polygonOffsetFactor={2}
                         roughness={0.5}
                         metalness={0.1}
                     />

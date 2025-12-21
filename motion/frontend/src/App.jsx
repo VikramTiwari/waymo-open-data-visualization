@@ -16,10 +16,16 @@ function App() {
 
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative' }}>
-      <Scene data={data} fileInfo={fileInfo} scenarioInfo={scenarioInfo} onFinished={() => {
-        console.log('Scenario finished, loading next...');
-        playNext();
-      }} />
+      <Scene
+        key={scenarioInfo ? scenarioInfo.index : 'empty'}
+        data={data}
+        fileInfo={fileInfo}
+        scenarioInfo={scenarioInfo}
+        onFinished={() => {
+          console.log('Scenario finished, loading next...');
+          playNext();
+        }}
+      />
     </div>
   );
 }

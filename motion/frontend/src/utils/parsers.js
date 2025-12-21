@@ -1,5 +1,20 @@
 // Generic Parsing Utilities for Waymo Data
 
+// Helper to find SDC index once
+const getSdcIndex = (sdcList) => {
+    if (!sdcList) return -1;
+    let idx = sdcList.indexOf(Number(1));
+    if (idx === -1) idx = sdcList.findIndex((v) => v == 1);
+    return idx;
+};
+
+// Helper to safely get values
+const getFeatVal = (parsedMap, key) => {
+    const feat = parsedMap.get(key);
+    if (!feat) return [];
+    return feat.floatList?.valueList || feat.int64List?.valueList || [];
+};
+
 export const parseMap = (data) => {
     if (!data) return null;
     const featureMap = data?.context?.featureMap;
@@ -22,21 +37,15 @@ export const parseMap = (data) => {
 export const calculateCenter = (parsedMap) => {
     if (!parsedMap) return [0, 0, 0];
 
-    // Try to find SDC
-    const sdcList = parsedMap.get("state/is_sdc")?.int64List?.valueList;
-    const xList = parsedMap.get("state/current/x")?.floatList?.valueList;
-    const yList = parsedMap.get("state/current/y")?.floatList?.valueList;
-    const zList = parsedMap.get("state/current/z")?.floatList?.valueList;
+    const sdcList = getFeatVal(parsedMap, "state/is_sdc");
+    const xList = getFeatVal(parsedMap, "state/current/x");
+    const yList = getFeatVal(parsedMap, "state/current/y");
+    const zList = getFeatVal(parsedMap, "state/current/z");
 
-    if (!xList || !yList) return [0, 0, 0];
+    if (!xList.length || !yList.length) return [0, 0, 0];
 
-    // Find index of SDC (val === 1)
-    let sdcIndex = -1;
-    if (sdcList) {
-      sdcIndex = sdcList.indexOf(Number(1));
-      if (sdcIndex === -1) sdcIndex = sdcList.findIndex((v) => v == 1);
-    }
-
+    // Find index of SDC
+    let sdcIndex = getSdcIndex(sdcList);
     // Fallback to first agent
     if (sdcIndex === -1) sdcIndex = 0;
 
@@ -53,31 +62,21 @@ export const parseScenarioId = (parsedMap) => {
 export const calculateSdcSpeeds = (parsedMap) => {
     if (!parsedMap) return [];
 
-    // 1. Find SDC Index
-    const sdcList = parsedMap.get("state/is_sdc")?.int64List?.valueList;
-    if (!sdcList) return [];
-
-    let sdcIndex = sdcList.indexOf(Number(1));
-    if (sdcIndex === -1) sdcIndex = sdcList.findIndex((v) => v == 1);
+    const sdcList = getFeatVal(parsedMap, "state/is_sdc");
+    const sdcIndex = getSdcIndex(sdcList);
     if (sdcIndex === -1) return [];
 
-    // 2. Get Speed Data
-    const getVal = (key) => {
-      const feat = parsedMap.get(key);
-      return feat?.floatList?.valueList || [];
-    };
-
     // Past
-    const pastVx = getVal("state/past/velocity_x");
-    const pastVy = getVal("state/past/velocity_y");
+    const pastVx = getFeatVal(parsedMap, "state/past/velocity_x");
+    const pastVy = getFeatVal(parsedMap, "state/past/velocity_y");
 
     // Current
-    const currVx = getVal("state/current/velocity_x");
-    const currVy = getVal("state/current/velocity_y");
+    const currVx = getFeatVal(parsedMap, "state/current/velocity_x");
+    const currVy = getFeatVal(parsedMap, "state/current/velocity_y");
 
     // Future
-    const futureVx = getVal("state/future/velocity_x");
-    const futureVy = getVal("state/future/velocity_y");
+    const futureVx = getFeatVal(parsedMap, "state/future/velocity_x");
+    const futureVy = getFeatVal(parsedMap, "state/future/velocity_y");
 
     const count = sdcList.length;
 
@@ -114,138 +113,188 @@ export const calculateSdcSpeeds = (parsedMap) => {
 export const parseAgents = (parsedMap, center) => {
     if (!parsedMap) return [];
 
-    const getVal = (key) => {
-      const feat = parsedMap.get(key);
-      if (!feat) return [];
-      return feat.floatList?.valueList || feat.int64List?.valueList || [];
-    };
-
-    const ids = getVal("state/id");
+    const ids = getFeatVal(parsedMap, "state/id");
     const count = ids.length;
     if (count === 0) return [];
 
-    const pastX = getVal("state/past/x");
-    const pastY = getVal("state/past/y");
-    const pastZ = getVal("state/past/z");
-    const pastYaw = getVal("state/past/bbox_yaw");
-    const pastVx = getVal("state/past/velocity_x");
-    const pastVy = getVal("state/past/velocity_y");
-    const pastLen = pastX.length / count;
+    const pastX = getFeatVal(parsedMap, "state/past/x");
+    const pastY = getFeatVal(parsedMap, "state/past/y");
+    const pastZ = getFeatVal(parsedMap, "state/past/z");
+    const pastYaw = getFeatVal(parsedMap, "state/past/bbox_yaw");
+    const pastVx = getFeatVal(parsedMap, "state/past/velocity_x");
+    const pastVy = getFeatVal(parsedMap, "state/past/velocity_y");
 
-    const currX = getVal("state/current/x");
-    const currY = getVal("state/current/y");
-    const currZ = getVal("state/current/z");
-    const currYaw = getVal("state/current/bbox_yaw");
-    const currVx = getVal("state/current/velocity_x");
-    const currVy = getVal("state/current/velocity_y");
+    // Check lengths safely
+    const pastLen = pastX.length > 0 ? pastX.length / count : 0;
 
-    const futureX = getVal("state/future/x");
-    const futureY = getVal("state/future/y");
-    const futureZ = getVal("state/future/z");
-    const futureYaw = getVal("state/future/bbox_yaw");
-    const futureVx = getVal("state/future/velocity_x");
-    const futureVy = getVal("state/future/velocity_y");
-    const futureLen = futureX.length / count;
+    const currX = getFeatVal(parsedMap, "state/current/x");
+    const currY = getFeatVal(parsedMap, "state/current/y");
+    const currZ = getFeatVal(parsedMap, "state/current/z");
+    const currYaw = getFeatVal(parsedMap, "state/current/bbox_yaw");
+    const currVx = getFeatVal(parsedMap, "state/current/velocity_x");
+    const currVy = getFeatVal(parsedMap, "state/current/velocity_y");
 
-    const width = getVal("state/current/width");
-    const length = getVal("state/current/length");
-    const height = getVal("state/current/height");
-    const type = getVal("state/type");
-    const isSdcList = getVal("state/is_sdc");
+    const futureX = getFeatVal(parsedMap, "state/future/x");
+    const futureY = getFeatVal(parsedMap, "state/future/y");
+    const futureZ = getFeatVal(parsedMap, "state/future/z");
+    const futureYaw = getFeatVal(parsedMap, "state/future/bbox_yaw");
+    const futureVx = getFeatVal(parsedMap, "state/future/velocity_x");
+    const futureVy = getFeatVal(parsedMap, "state/future/velocity_y");
+    const futureLen = futureX.length > 0 ? futureX.length / count : 0;
+
+    const width = getFeatVal(parsedMap, "state/current/width");
+    const length = getFeatVal(parsedMap, "state/current/length");
+    const height = getFeatVal(parsedMap, "state/current/height");
+    const type = getFeatVal(parsedMap, "state/type");
+    const isSdcList = getFeatVal(parsedMap, "state/is_sdc");
 
     const [cx, cy, cz] = center;
 
-    // RoadGraph for Parked Detection
-    const mapX = getVal("roadgraph_samples/xyz");
-    const mapType = getVal("roadgraph_samples/type");
-    const lanePoints = [];
-    if (mapX && mapType) {
-      for (let i = 0; i < mapType.length; i++) {
-        if (mapType[i] === 1 || mapType[i] === 2) {
-          lanePoints.push({
-            x: mapX[i * 3] - cx,
-            y: mapX[i * 3 + 1] - cy,
-            z: mapX[i * 3 + 2] - cz,
-          });
+    // Optimization: Spatial Grid for Parked Detection
+    // Only build if we have agents that might be parked (Type 1: Vehicle)
+    let hasVehicles = false;
+    for(let i=0; i<count; i++) {
+        if(type[i] === 1) {
+            hasVehicles = true;
+            break;
         }
-      }
+    }
+
+    let spatialGrid = null;
+    const GRID_SIZE = 10; // 10m grid cells
+
+    if (hasVehicles) {
+        const mapX = getFeatVal(parsedMap, "roadgraph_samples/xyz");
+        const mapType = getFeatVal(parsedMap, "roadgraph_samples/type");
+
+        if (mapX && mapType) {
+             spatialGrid = new Map();
+             const getKey = (x, y) => {
+                 const gx = Math.floor(x / GRID_SIZE);
+                 const gy = Math.floor(y / GRID_SIZE);
+                 return `${gx},${gy}`;
+             };
+
+             // Populate grid with lane points
+             for (let i = 0; i < mapType.length; i++) {
+                if (mapType[i] === 1 || mapType[i] === 2) {
+                    const x = mapX[i * 3] - cx;
+                    const y = mapX[i * 3 + 1] - cy;
+                    // z not needed for parked check 2d
+                    const key = getKey(x, y);
+                    if (!spatialGrid.has(key)) spatialGrid.set(key, []);
+                    spatialGrid.get(key).push({x, y});
+                }
+             }
+        }
     }
 
     const agents = [];
     for (let i = 0; i < count; i++) {
       const trajectory = [];
 
-      const pushStep = (rawX, rawY, rawZ, rawYaw, rawVx, rawVy) => {
-        const vx = rawVx || 0;
-        const vy = rawVy || 0;
+      // Helper to avoid allocating object if not needed, but we need it for trajectory array
+      // Replaced pushStep with inline logic to avoid closure creation overhead in loop
+      // Past
+      for (let t = 0; t < pastLen; t++) {
+        const idx = i * pastLen + t;
+        const vx = pastVx[idx] || 0;
+        const vy = pastVy[idx] || 0;
         trajectory.push({
-          x: rawX - cx,
-          y: rawY - cy,
-          z: rawZ - cz,
-          yaw: rawYaw || 0,
+          x: pastX[idx] - cx,
+          y: pastY[idx] - cy,
+          z: pastZ[idx] - cz,
+          yaw: pastYaw[idx] || 0,
           vx: vx,
           vy: vy,
           speed: Math.sqrt(vx * vx + vy * vy),
         });
-      };
-
-      for (let t = 0; t < pastLen; t++) {
-        const idx = i * pastLen + t;
-        pushStep(
-          pastX[idx],
-          pastY[idx],
-          pastZ[idx],
-          pastYaw[idx],
-          pastVx[idx],
-          pastVy[idx]
-        );
       }
 
-      pushStep(currX[i], currY[i], currZ[i], currYaw[i], currVx[i], currVy[i]);
+      // Current
+      {
+          const vx = currVx[i] || 0;
+          const vy = currVy[i] || 0;
+          trajectory.push({
+            x: currX[i] - cx,
+            y: currY[i] - cy,
+            z: currZ[i] - cz,
+            yaw: currYaw[i] || 0,
+            vx: vx,
+            vy: vy,
+            speed: Math.sqrt(vx * vx + vy * vy),
+          });
+      }
 
+      // Future
       for (let t = 0; t < futureLen; t++) {
         const idx = i * futureLen + t;
-        pushStep(
-          futureX[idx],
-          futureY[idx],
-          futureZ[idx],
-          futureYaw[idx],
-          futureVx[idx],
-          futureVy[idx]
-        );
+        const vx = futureVx[idx] || 0;
+        const vy = futureVy[idx] || 0;
+        trajectory.push({
+          x: futureX[idx] - cx,
+          y: futureY[idx] - cy,
+          z: futureZ[idx] - cz,
+          yaw: futureYaw[idx] || 0,
+          vx: vx,
+          vy: vy,
+          speed: Math.sqrt(vx * vx + vy * vy),
+        });
       }
 
       // Accel calc
       for (let t = 0; t < trajectory.length - 1; t++) {
         const step = trajectory[t];
         const next = trajectory[t + 1];
-        const speedCurr = Math.sqrt(step.vx * step.vx + step.vy * step.vy);
-        const speedNext = Math.sqrt(next.vx * next.vx + next.vy * next.vy);
-        const accel = (speedNext - speedCurr) / 0.1;
+        // Reuse speed if possible, already calc'd
+        // But accel needs to be added to 'step'
+        const accel = (next.speed - step.speed) / 0.1;
         step.accel = accel;
       }
 
       let maxSpeed = 0;
-      for (const step of trajectory) {
-        const s = Math.sqrt(step.vx * step.vx + step.vy * step.vy);
-        if (s > maxSpeed) maxSpeed = s;
+      for (let t = 0; t < trajectory.length; t++) {
+          if (trajectory[t].speed > maxSpeed) maxSpeed = trajectory[t].speed;
       }
 
       let isParked = false;
-      if (type[i] === 1 && maxSpeed < 0.5) {
+      // Optimize Parked Check
+      if (type[i] === 1 && maxSpeed < 0.5 && spatialGrid) {
         const startPos = trajectory[0];
-        let minDist = Infinity;
-        if (lanePoints.length > 0) {
-          for (let k = 0; k < lanePoints.length; k += 5) {
-            const lp = lanePoints[k];
-            const dx = lp.x - startPos.x;
-            const dy = lp.y - startPos.y;
-            const d = dx * dx + dy * dy;
-            if (d < minDist) minDist = d;
-            if (d < 4.0) break;
-          }
-          if (minDist > 4.0) isParked = true;
+        const gx = Math.floor(startPos.x / GRID_SIZE);
+        const gy = Math.floor(startPos.y / GRID_SIZE);
+
+        // Check 3x3 grid cells around
+        let found = false;
+        let minDistSq = Infinity;
+        const checkCell = (x, y) => {
+             const key = `${x},${y}`;
+             const cell = spatialGrid.get(key);
+             if (cell) {
+                 for(let k=0; k<cell.length; k++) {
+                     const lp = cell[k];
+                     const dx = lp.x - startPos.x;
+                     const dy = lp.y - startPos.y;
+                     const d = dx*dx + dy*dy;
+                     if (d < minDistSq) minDistSq = d;
+                     if (d < 4.0) return true; // Found close lane point
+                 }
+             }
+             return false;
+        };
+
+        // Check center and neighbors
+        for(let ox=-1; ox<=1; ox++) {
+            for(let oy=-1; oy<=1; oy++) {
+                if(checkCell(gx+ox, gy+oy)) {
+                    found = true;
+                    break;
+                }
+            }
+            if(found) break;
         }
+
+        if (!found) isParked = true; // No lane point within 2m (4.0 sq)
       }
 
       const isSdc = isSdcList && isSdcList[i] == 1;
@@ -265,27 +314,21 @@ export const parseAgents = (parsedMap, center) => {
 export const parseTrafficLights = (parsedMap, center) => {
     if (!parsedMap) return [];
 
-    const getVal = (key) => {
-      const feat = parsedMap.get(key);
-      if (!feat) return [];
-      return feat.floatList?.valueList || feat.int64List?.valueList || [];
-    };
-
-    const ids = getVal("traffic_light_state/current/id");
+    const ids = getFeatVal(parsedMap, "traffic_light_state/current/id");
     const count = ids.length;
     if (count === 0) return [];
 
-    const currentStates = getVal("traffic_light_state/current/state");
-    const currentX = getVal("traffic_light_state/current/x");
-    const currentY = getVal("traffic_light_state/current/y");
-    const currentZ = getVal("traffic_light_state/current/z");
-    const currentValid = getVal("traffic_light_state/current/valid");
+    const currentStates = getFeatVal(parsedMap, "traffic_light_state/current/state");
+    const currentX = getFeatVal(parsedMap, "traffic_light_state/current/x");
+    const currentY = getFeatVal(parsedMap, "traffic_light_state/current/y");
+    const currentZ = getFeatVal(parsedMap, "traffic_light_state/current/z");
+    const currentValid = getFeatVal(parsedMap, "traffic_light_state/current/valid");
 
-    const pastStates = getVal("traffic_light_state/past/state");
-    const pastValid = getVal("traffic_light_state/past/valid");
+    const pastStates = getFeatVal(parsedMap, "traffic_light_state/past/state");
+    const pastValid = getFeatVal(parsedMap, "traffic_light_state/past/valid");
 
-    const futureStates = getVal("traffic_light_state/future/state");
-    const futureValid = getVal("traffic_light_state/future/valid");
+    const futureStates = getFeatVal(parsedMap, "traffic_light_state/future/state");
+    const futureValid = getFeatVal(parsedMap, "traffic_light_state/future/valid");
 
     const pastLen = pastStates.length > 0 ? pastStates.length / count : 0;
     const futureLen = futureStates.length > 0 ? futureStates.length / count : 0;
@@ -293,9 +336,9 @@ export const parseTrafficLights = (parsedMap, center) => {
     const [cx, cy, cz] = center;
 
     // RoadGraph samples for orientation
-    const mapIds = getVal("roadgraph_samples/id");
-    const mapDir = getVal("roadgraph_samples/dir");
-    const mapX = getVal("roadgraph_samples/xyz");
+    const mapIds = getFeatVal(parsedMap, "roadgraph_samples/id");
+    const mapDir = getFeatVal(parsedMap, "roadgraph_samples/dir");
+    const mapX = getFeatVal(parsedMap, "roadgraph_samples/xyz");
 
     // Build efficient lookup for map samples
     const samplesById = new Map();
@@ -322,15 +365,18 @@ export const parseTrafficLights = (parsedMap, center) => {
       // Find nearest roadgraph sample with same ID
       let yaw = 0;
       const sIndices = samplesById.get(ids[i]);
-      if (sIndices) {
+      if (sIndices && sIndices.length > 0) {
         let minDist = Infinity;
         let bestIdx = -1;
+        // Optimization: Pre-check if indices count is huge.
+        // Usually it's small per segment. If large, could optimize, but map lookup reduced space significantly.
         for (const idx of sIndices) {
           const mx = mapX[idx * 3] - cx;
           const my = mapX[idx * 3 + 1] - cy;
+          // z check might be important if multiple levels
           const mz = mapX[idx * 3 + 2] - cz;
-          const d =
-            (mx - x) * (mx - x) + (my - y) * (my - y) + (mz - z) * (mz - z);
+
+          const d = (mx - x) * (mx - x) + (my - y) * (my - y) + (mz - z) * (mz - z);
           if (d < minDist) {
             minDist = d;
             bestIdx = idx;
@@ -340,8 +386,6 @@ export const parseTrafficLights = (parsedMap, center) => {
         if (bestIdx !== -1) {
           const dx = mapDir[bestIdx * 3];
           const dy = mapDir[bestIdx * 3 + 1];
-          // Traffic flows in (dx, dy). Light faces oncoming traffic.
-          // So Light Yaw = Lane Yaw + PI
           yaw = Math.atan2(dy, dx) + Math.PI;
         }
       }
@@ -388,26 +432,21 @@ export const parseTrafficLights = (parsedMap, center) => {
     }
 
     // Dedup / Cluster
+    // Use spatial hash for dedup instead of O(N^2)
     const uniqueLights = [];
-    const seenPos = [];
+    const dedupGrid = new Map(); // key "x_y_z" rounded
 
     for (const light of parsedLights) {
-      let duplicate = false;
-      for (const sp of seenPos) {
-        const dx = sp.x - light.x;
-        const dy = sp.y - light.y;
-        const dz = sp.z - light.z;
-        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-        if (dist < 0.2) {
-          duplicate = true;
-          break;
-        }
-      }
+       // Round to 0.2m precision for key
+       const kx = Math.round(light.x * 5);
+       const ky = Math.round(light.y * 5);
+       const kz = Math.round(light.z * 5);
+       const key = `${kx},${ky},${kz}`;
 
-      if (!duplicate) {
-        uniqueLights.push(light);
-        seenPos.push({ x: light.x, y: light.y, z: light.z });
-      }
+       if(!dedupGrid.has(key)) {
+           dedupGrid.set(key, true);
+           uniqueLights.push(light);
+       }
     }
 
     return uniqueLights;
@@ -416,25 +455,16 @@ export const parseTrafficLights = (parsedMap, center) => {
 export const parsePathSamples = (parsedMap, center) => {
     if (!parsedMap) return null;
 
-    const getVal = (key) => {
-      const feat = parsedMap.get(key);
-      if (!feat) return [];
-      return feat.floatList?.valueList || feat.int64List?.valueList || [];
-    };
-
-    const rawXyz = getVal("path_samples/xyz");
-    const ids = getVal("path_samples/id");
+    const rawXyz = getFeatVal(parsedMap, "path_samples/xyz");
+    const ids = getFeatVal(parsedMap, "path_samples/id");
 
     if (!rawXyz.length || !ids.length) return null;
 
     const [cx, cy, cz] = center;
-
     const vertices = [];
 
     let prevId = null;
-    let px = 0,
-      py = 0,
-      pz = 0;
+    let px = 0, py = 0, pz = 0;
 
     for (let i = 0; i < ids.length; i++) {
       const id = ids[i];
@@ -461,47 +491,35 @@ export const parsePathSamples = (parsedMap, center) => {
 export const parseSdcState = (parsedMap, center) => {
     if (!parsedMap) return null;
 
-    const getVal = (key) => {
-      const feat = parsedMap.get(key);
-      return feat?.floatList?.valueList || feat?.int64List?.valueList || [];
-    };
-
-    const sdcList = getVal("state/is_sdc");
-    let sdcIndex = -1;
-    for (let i = 0; i < sdcList.length; i++) {
-      if (sdcList[i] == 1) {
-        sdcIndex = i;
-        break;
-      }
-    }
-
+    const sdcList = getFeatVal(parsedMap, "state/is_sdc");
+    const sdcIndex = getSdcIndex(sdcList);
     if (sdcIndex === -1) return null;
 
     const count = sdcList.length;
 
-    const pastX = getVal("state/past/x");
-    const pastY = getVal("state/past/y");
-    const pastZ = getVal("state/past/z");
-    const pastVx = getVal("state/past/velocity_x");
-    const pastVy = getVal("state/past/velocity_y");
+    const pastX = getFeatVal(parsedMap, "state/past/x");
+    const pastY = getFeatVal(parsedMap, "state/past/y");
+    const pastZ = getFeatVal(parsedMap, "state/past/z");
+    const pastVx = getFeatVal(parsedMap, "state/past/velocity_x");
+    const pastVy = getFeatVal(parsedMap, "state/past/velocity_y");
 
-    const currX = getVal("state/current/x");
-    const currY = getVal("state/current/y");
-    const currZ = getVal("state/current/z");
-    const currVx = getVal("state/current/velocity_x");
-    const currVy = getVal("state/current/velocity_y");
-    const heightList = getVal("state/current/height");
+    const currX = getFeatVal(parsedMap, "state/current/x");
+    const currY = getFeatVal(parsedMap, "state/current/y");
+    const currZ = getFeatVal(parsedMap, "state/current/z");
+    const currVx = getFeatVal(parsedMap, "state/current/velocity_x");
+    const currVy = getFeatVal(parsedMap, "state/current/velocity_y");
+    const heightList = getFeatVal(parsedMap, "state/current/height");
 
-    const futureX = getVal("state/future/x");
-    const futureY = getVal("state/future/y");
-    const futureZ = getVal("state/future/z");
-    const futureVx = getVal("state/future/velocity_x");
-    const futureVy = getVal("state/future/velocity_y");
+    const futureX = getFeatVal(parsedMap, "state/future/x");
+    const futureY = getFeatVal(parsedMap, "state/future/y");
+    const futureZ = getFeatVal(parsedMap, "state/future/z");
+    const futureVx = getFeatVal(parsedMap, "state/future/velocity_x");
+    const futureVy = getFeatVal(parsedMap, "state/future/velocity_y");
 
     const sdcHeight = heightList[sdcIndex] || 1.6;
 
-    const pastLen = pastX.length / count;
-    const futureLen = futureX.length / count;
+    const pastLen = pastX.length > 0 ? pastX.length / count : 0;
+    const futureLen = futureX.length > 0 ? futureX.length / count : 0;
 
     const [cx, cy, cz] = center;
     const trajectory = [];
